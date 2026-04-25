@@ -8,6 +8,10 @@ export type AppConfig = {
       serviceRoleKey: string;
     };
   };
+  intakeToken: {
+    secret: string;
+    expiryMinutes: number;
+  };
   reservationHoldMinutes: number;
   pricingDefaults: {
     currency: string;
@@ -22,6 +26,7 @@ const requiredKeys = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
+  "INTAKE_TOKEN_SECRET",
 ] as const;
 
 function readNumber(
@@ -53,6 +58,10 @@ export function createAppConfig(environment: Environment): AppConfig {
         anonKey: environment.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
         serviceRoleKey: environment.SUPABASE_SERVICE_ROLE_KEY ?? "",
       },
+    },
+    intakeToken: {
+      secret: environment.INTAKE_TOKEN_SECRET ?? "",
+      expiryMinutes: readNumber(environment, "INTAKE_TOKEN_EXPIRY_MINUTES", 30),
     },
     reservationHoldMinutes: readNumber(
       environment,
