@@ -22,7 +22,8 @@ The architecture is designed to balance:
 
 ### Core Services
 
-- `Vapi` for inbound voice runtime and SMS handoff
+- `Vapi` for inbound voice runtime and call orchestration
+- `Twilio WhatsApp Business API` for outbound WhatsApp messages (intake form link, payment link, booking confirmation)
 - `Supabase` for Postgres, auth, storage, realtime updates, and scheduled cron jobs
 - `Stripe` for payment collection and payment confirmation
 - `OpenAI` for job classification and optional image analysis
@@ -87,7 +88,7 @@ Customer contact details are collected through a structured web form, not extrac
 The flow works as follows:
 
 1. The AI answers the call and asks two lightweight verbal questions: what is the problem, and how urgent is it.
-2. The AI immediately sends a short intake form link by SMS to the caller's number.
+2. The AI immediately sends a short intake form link via WhatsApp to the caller's number.
 3. While still on the call, the AI tells the customer the form has been sent and asks them to fill it in — it takes under a minute.
 4. The backend polls or receives a webhook when the form is submitted.
 5. Once the form is complete, the backend advances the job from `intake` to `qualified` and the AI can continue with pricing and scheduling.
@@ -100,7 +101,7 @@ There are three distinct sources of information. Each has a clear owner and must
 
 | Source | What it provides | How it's captured |
 |---|---|---|
-| **Intake form** | Name, address, phone number confirmation, photos | Customer fills in a signed form link sent by SMS mid-call |
+| **Intake form** | Name, address, phone number confirmation, photos | Customer fills in a signed form link sent via WhatsApp mid-call |
 | **Voice conversation** | Problem description, urgency, verbal context | AI generates a concise summary from the call transcript |
 | **Worker view** | All three combined | Dashboard shows form data + AI call summary + photos |
 
@@ -168,8 +169,8 @@ Responsibilities:
 - Receive inbound call events from `Vapi`
 - Track live call/session context
 - Capture transcript and event history
-- Generate a signed intake form token and trigger SMS delivery at call start
-- Send SMS links for image upload and payment when needed
+- Generate a signed intake form token and trigger WhatsApp delivery at call start
+- Send WhatsApp links for image upload and payment when needed
 
 Key output:
 
@@ -262,7 +263,7 @@ Responsibilities:
 
 Responsibilities:
 
-- Send customer-facing messages such as:
+- Send customer-facing WhatsApp messages such as:
   - intake form link (mid-call, immediately after call starts)
   - image upload prompt
   - payment link
@@ -387,8 +388,9 @@ Define and use shared enums for:
 - Inbound call handling
 - Live voice runtime
 - Conversation execution at the telephony layer
-- Sending SMS handoff messages including the intake form link
 - Emitting webhook or event callbacks into the app
+
+WhatsApp messages (intake form link, payment link, booking confirmation) are sent directly from the app via Twilio's WhatsApp Business API, not via Vapi.
 
 The app remains responsible for business decisions and persistence.
 
@@ -472,7 +474,7 @@ The uploaded asset should be stored privately and linked back to the relevant jo
 
 - A signed token is generated when a call session is created
 - The token encodes the call session ID and an expiry time
-- The token is included in the SMS link sent to the customer
+- The token is included in the WhatsApp link sent to the customer
 - On form submission, the token is validated server-side before any data is written
 - Tokens expire after a configurable window (default: 30 minutes)
 
@@ -522,13 +524,13 @@ For v1:
 
 - Customer calls
 - AI asks about the problem and urgency
-- AI sends intake form link by SMS
+- AI triggers intake form link sent via WhatsApp
 - Customer fills in the form on their phone during the call
 - System advances the job to `qualified`
 - AI provides a price expectation
 - Customer selects a slot
 - System holds the slot
-- Customer pays via SMS payment link
+- Customer pays via WhatsApp payment link
 - Booking becomes confirmed
 - Dashboard updates live
 
