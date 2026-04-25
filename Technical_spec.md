@@ -23,10 +23,9 @@ The architecture is designed to balance:
 ### Core Services
 
 - `Vapi` for inbound voice runtime and SMS handoff
-- `Supabase` for Postgres, auth, storage, and realtime updates
+- `Supabase` for Postgres, auth, storage, realtime updates, and scheduled cron jobs
 - `Stripe` for payment collection and payment confirmation
 - `OpenAI` for job classification and optional image analysis
-- `Inngest` for async workflows, delays, retries, and reservation expiry
 
 ### Deployment Assumption
 
@@ -270,16 +269,17 @@ Responsibilities:
   - booking confirmation
 - Surface business-facing alerts and realtime dashboard updates
 
-### 10. Async Workflow Layer
+### 10. Reservation Expiry Layer
 
-`Inngest` will handle:
+Reservation expiry uses two complementary mechanisms — no external workflow engine required:
 
-- Reservation-expiry timers
-- Webhook retries and recovery steps
-- Delayed follow-up work
-- Event-driven background orchestration
+**Lazy expiry (primary correctness guarantee)**
+Every read of a reservation checks `expires_at < now()` at the service layer and treats the record as expired immediately, regardless of its stored status. This means an expired slot can never be double-booked even if the background sweep hasn't run yet.
 
-This avoids pushing long-running logic into request-response route handlers.
+**Supabase scheduled function / `pg_cron` (cleanup sweep)**
+A SQL job runs on a short interval (e.g. every minute) to sweep any `held` reservations whose `expires_at` has passed, mark them `expired`, and advance their linked jobs to `expired`. This keeps the database state consistent and dashboards accurate without any external queue or workflow service.
+
+Both mechanisms are idempotent — running either more than once on the same reservation produces no additional state changes.
 
 ## Data Model
 
@@ -424,14 +424,13 @@ The app must validate and persist OpenAI outputs before relying on them for busi
 
 The application should never handle raw card details directly.
 
-### Inngest
+### Supabase Scheduled Functions
 
-`Inngest` is responsible for:
+Supabase's built-in `pg_cron` extension handles the reservation expiry sweep:
 
-- Delayed hold expiry
-- Retry-safe background execution
-- Event-driven orchestration support
-- Audit-friendly async workflow visibility
+- Runs on a configured interval (e.g. every minute)
+- Updates stale `held` reservations to `expired` and linked jobs to `expired`
+- Requires no external service, queue, or deployment dependency beyond Supabase itself
 
 ## API And Interface Expectations
 
@@ -500,7 +499,7 @@ The UI should clearly distinguish:
 - A slot must not be double-booked
 - Payment success must be idempotent
 - Replayed webhooks must not create duplicate confirmations
-- Reservation expiry must release held capacity automatically
+- Reservation expiry must release held capacity automatically — enforced by lazy expiry on read and a Supabase cron sweep
 - Image analysis failure must not block booking progression
 - Missing structured fields must block business transitions that require them
 - A payment link must never be sent before the intake form is fully submitted

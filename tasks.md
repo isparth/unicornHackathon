@@ -165,22 +165,22 @@ This milestone establishes the three distinct sources of information that togeth
 
 ### Stripe Payment Flow
 
-- [ ] Create Stripe Checkout or Payment Link sessions for the call-out fee tied to a job and reservation.
-- [ ] Before creating the session, verify that the intake form has been submitted and all required customer fields are present — return an error if not.
-- [ ] Store Stripe identifiers, payment amount, payment status, and related metadata in the payment table.
-- [ ] Generate a secure customer payment URL that can be sent by SMS or displayed in a demo flow.
+- [x] Create Stripe Checkout or Payment Link sessions for the call-out fee tied to a job and reservation.
+- [x] Before creating the session, verify that the intake form has been submitted and all required customer fields are present — return an error if not.
+- [x] Store Stripe identifiers, payment amount, payment status, and related metadata in the payment table.
+- [x] Generate a secure customer payment URL that can be sent by SMS or displayed in a demo flow.
 
 ### Stripe Webhooks
 
-- [ ] Implement the Stripe webhook endpoint for successful payment, failed payment, and relevant retry events.
-- [ ] Make webhook processing idempotent so repeated delivery cannot create duplicate confirmations.
-- [ ] Advance the job to `confirmed`, mark the payment as paid, and lock the reservation only after payment success.
+- [x] Implement the Stripe webhook endpoint for successful payment, failed payment, and relevant retry events.
+- [x] Make webhook processing idempotent so repeated delivery cannot create duplicate confirmations.
+- [x] Advance the job to `confirmed`, mark the payment as paid, and lock the reservation only after payment success.
 
-### Inngest Workflows
+### Reservation Expiry (Lazy + Supabase Cron)
 
-- [ ] Add an Inngest workflow to expire unpaid reservations after the configured hold window.
-- [ ] Release held capacity and move the job to `expired` when payment has not succeeded in time.
-- [ ] Add retry-safe background handling for webhook follow-up actions and recovery paths.
+- [x] Add a lazy expiry check to the reservation service so any read of a reservation automatically treats it as expired if `expires_at < now()` — no background job needed for correctness.
+- [ ] Add a Supabase scheduled function (or `pg_cron` SQL job) that runs every minute to sweep `held` reservations past their `expires_at`, set their status to `expired`, and move the linked job back to `slot_held`/`expired` — this keeps the database clean without Inngest.
+- [x] Ensure the lazy check and the cron sweep are idempotent so running both produces no double-transitions.
 
 ### Notification Hooks
 
@@ -189,15 +189,17 @@ This milestone establishes the three distinct sources of information that togeth
 
 ### QA And Acceptance Coverage
 
-- [ ] Test successful payment confirmation, failed payment handling, repeated webhook delivery, and reservation expiry.
-- [ ] Test that payment session creation is blocked when the intake form is incomplete.
-- [ ] Add integration-style tests for the full qualified job to reserved slot to paid confirmation path using mocked Stripe events.
+- [x] Test successful payment confirmation, failed payment handling, and repeated webhook delivery.
+- [x] Test that payment session creation is blocked when the intake form is incomplete.
+- [x] Add integration-style tests for the full qualified job to reserved slot to paid confirmation path using mocked Stripe events.
+- [x] Test lazy expiry: verify that a reservation past its `expires_at` is treated as expired on read.
+- [ ] Test the cron sweep: verify that stale held reservations and their linked jobs are correctly transitioned.
 
 ### After this milestone, you can…
 
 - Confirm bookings only after successful payment.
 - Demonstrate that a payment link is never sent to a customer who has not completed the intake form.
-- Demonstrate unpaid reservations expiring automatically.
+- Demonstrate unpaid reservations expiring automatically via lazy check on read and a periodic Supabase cron sweep.
 - Show retry-safe behavior for repeated Stripe webhook events.
 
 ## Milestone 5: Voice, SMS Handoff, And Image Analysis
@@ -306,7 +308,7 @@ This milestone establishes the three distinct sources of information that togeth
 
 - [ ] Add structured logging for call sessions, intake form token generation, form submissions, classification attempts, reservation creation, payment events, webhook processing, and expiry workflows.
 - [ ] Add admin-visible error states for failed classification, failed image analysis, failed SMS delivery, failed payment creation, and blocked payment attempts due to incomplete intake.
-- [ ] Ensure external webhook endpoints validate signatures or shared secrets where applicable.
+- [x] Ensure external webhook endpoints validate signatures or shared secrets where applicable.
 
 ### Security Baseline
 
