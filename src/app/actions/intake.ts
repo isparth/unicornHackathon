@@ -276,17 +276,39 @@ export async function submitIntakeForm(
       .eq("id", sessionId);
   }
 
-  // 5. Store photo metadata as uploaded_asset records (best-effort — don't block on failure)
+  // 5. Upload photos to Supabase Storage and store the object paths as uploaded_asset records.
+  //    Best-effort — a storage failure does not block form submission.
   if (photos.length > 0) {
     const resolvedJobId = jobId ?? (session.job_id as string | null);
+
     for (const photo of photos) {
-      // Store the base64 data URL as the storage_path for now.
-      // In Milestone 5 this will be replaced with a real Supabase Storage upload.
+      // Convert data URL to a Buffer for upload
+      const base64Data = photo.dataUrl.split(",")[1];
+      if (!base64Data) continue;
+      const fileBuffer = Buffer.from(base64Data, "base64");
+
+      // Path: job-photos/<sessionId>/<timestamp>-<sanitised filename>
+      const safeName = photo.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const objectPath = `${sessionId}/${Date.now()}-${safeName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("job-photos")
+        .upload(objectPath, fileBuffer, {
+          contentType: photo.mimeType,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        // Log and skip — don't abort the whole submission for a photo failure
+        console.error(`Photo upload failed for ${photo.fileName}:`, uploadError.message);
+        continue;
+      }
+
       await supabase.from("uploaded_assets").insert({
         job_id: resolvedJobId,
         call_session_id: sessionId,
         type: "image",
-        storage_path: photo.dataUrl,
+        storage_path: objectPath,
         analysis_status: "pending",
       });
     }

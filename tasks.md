@@ -180,9 +180,9 @@
 - Demonstrate unpaid reservations expiring automatically.
 - Show retry-safe behavior for repeated Stripe webhook events.
 
-## Milestone 5: Voice, SMS Handoff, And Image Upload
+## Milestone 5: Voice, SMS Handoff, And Image Analysis
 
-**Goal:** Connect the app-owned business flow to Vapi voice events, SMS handoffs for the intake form and payment link, optional image upload, and image analysis.
+**Goal:** Connect the app-owned business flow to Vapi voice events, SMS handoffs for the intake form and payment link, and image analysis.
 
 ### Vapi Voice Integration
 
@@ -202,12 +202,6 @@
 - Wire SMS sending through Vapi where supported, or through a notification adapter with a mocked local fallback.
 - Track outbound messages and delivery-relevant metadata for troubleshooting.
 - Ensure the intake form SMS is sent immediately when a call session is created, not deferred.
-
-### Image Upload
-
-- Build the customer image upload page linked to a job or call session through a signed token.
-- Store uploaded images privately in Supabase Storage and create uploaded asset records.
-- Ensure the booking flow continues when image upload is skipped or fails.
 
 ### Image Analysis
 
