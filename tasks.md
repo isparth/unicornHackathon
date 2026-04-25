@@ -179,13 +179,13 @@ This milestone establishes the three distinct sources of information that togeth
 ### Reservation Expiry (Lazy + Supabase Cron)
 
 - [x] Add a lazy expiry check to the reservation service so any read of a reservation automatically treats it as expired if `expires_at < now()` — no background job needed for correctness.
-- [ ] Add a Supabase scheduled function (or `pg_cron` SQL job) that runs every minute to sweep `held` reservations past their `expires_at`, set their status to `expired`, and move the linked job back to `slot_held`/`expired` — this keeps the database clean without Inngest.
+- [x] Add a Supabase scheduled function (or `pg_cron` SQL job) that runs every minute to sweep `held` reservations past their `expires_at`, set their status to `expired`, and move the linked job back to `slot_held`/`expired` — this keeps the database clean without Inngest.
 - [x] Ensure the lazy check and the cron sweep are idempotent so running both produces no double-transitions.
 
 ### Notification Hooks
 
-- [ ] Define notification events for payment requested, booking confirmed, payment failed, and reservation expired.
-- [ ] Implement a placeholder notification service interface that can later be backed by Vapi SMS or another provider.
+- [x] Define notification events for payment requested, booking confirmed, payment failed, and reservation expired.
+- [x] Implement a placeholder notification service interface that can later be backed by Vapi SMS or another provider.
 
 ### QA And Acceptance Coverage
 
@@ -193,7 +193,7 @@ This milestone establishes the three distinct sources of information that togeth
 - [x] Test that payment session creation is blocked when the intake form is incomplete.
 - [x] Add integration-style tests for the full qualified job to reserved slot to paid confirmation path using mocked Stripe events.
 - [x] Test lazy expiry: verify that a reservation past its `expires_at` is treated as expired on read.
-- [ ] Test the cron sweep: verify that stale held reservations and their linked jobs are correctly transitioned.
+- [x] Test the cron sweep: verify that stale held reservations and their linked jobs are correctly transitioned.
 
 ### After this milestone, you can…
 
