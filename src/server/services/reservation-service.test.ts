@@ -4,6 +4,8 @@ import {
   releaseReservation,
   expireReservation,
   hasOverlappingReservation,
+  getReservation,
+  isHeldButExpired,
 } from "./reservation-service";
 
 // ─── Supabase mock ─────────────────────────────────────────────────────────────
@@ -27,6 +29,8 @@ type MockState = {
   overlappingReservations?: Record<string, unknown>[];
   overlappingJobs?: Record<string, unknown>[];
   reservationForRelease?: Record<string, unknown> | null;
+  /** Used by getReservation — takes priority over reservationForRelease */
+  reservationById?: Record<string, unknown> | null;
   insertError?: { message: string; code?: string } | null;
   jobUpdateError?: { message: string } | null;
   resUpdateError?: { message: string } | null;
@@ -57,10 +61,14 @@ function makeChain(table: string): Record<string, unknown> {
         return { data: state.worker ?? null, error: state.worker ? null : { message: "not found" } };
       }
       if (table === "reservations") {
-        // Used to load existing reservation (idempotency) or reservationForRelease
-        const data = state.existingReservation !== undefined
-          ? state.existingReservation
-          : state.reservationForRelease;
+        // reservationById takes priority (used by getReservation)
+        // then existingReservation (idempotency check), then reservationForRelease
+        const data =
+          state.reservationById !== undefined
+            ? state.reservationById
+            : state.existingReservation !== undefined
+              ? state.existingReservation
+              : state.reservationForRelease;
         if (data === null || data === undefined) {
           return { data: null, error: { message: "not found" } };
         }
@@ -374,7 +382,10 @@ describe("expireReservation", () => {
 
 describe("hasOverlappingReservation", () => {
   it("returns true when overlapping reservations exist", async () => {
-    state = { overlappingReservations: [{ id: "res-001" }], overlappingJobs: [] };
+    state = {
+      overlappingReservations: [{ id: "res-001", status: "held", expires_at: "2099-01-01T00:00:00Z" }],
+      overlappingJobs: [],
+    };
     const result = await hasOverlappingReservation(WORKER_ID, SLOT_START, SLOT_END);
     expect(result).toBe(true);
   });
@@ -389,5 +400,123 @@ describe("hasOverlappingReservation", () => {
     state = { overlappingReservations: [], overlappingJobs: [{ id: "job-conf" }] };
     const result = await hasOverlappingReservation(WORKER_ID, SLOT_START, SLOT_END);
     expect(result).toBe(true);
+  });
+
+  it("returns false when the only overlapping reservation is held but past its expires_at", async () => {
+    // Reservation exists in DB with status=held but expired 1 hour ago
+    const pastExpiry = new Date(NOW.getTime() - 60 * 60 * 1000).toISOString();
+    state = {
+      overlappingReservations: [{ id: "res-stale", status: "held", expires_at: pastExpiry }],
+      overlappingJobs: [],
+    };
+    const result = await hasOverlappingReservation(WORKER_ID, SLOT_START, SLOT_END, undefined, NOW);
+    expect(result).toBe(false);
+  });
+
+  it("returns true when a confirmed reservation is in the slot regardless of expires_at", async () => {
+    // Confirmed reservations don't have a hold window — they should always block
+    state = {
+      overlappingReservations: [{ id: "res-conf", status: "confirmed", expires_at: "2000-01-01T00:00:00Z" }],
+      overlappingJobs: [],
+    };
+    const result = await hasOverlappingReservation(WORKER_ID, SLOT_START, SLOT_END, undefined, NOW);
+    expect(result).toBe(true);
+  });
+});
+
+// ─── isHeldButExpired ─────────────────────────────────────────────────────────
+
+describe("isHeldButExpired", () => {
+  const baseReservation = {
+    id: "res-001",
+    jobId: JOB_ID,
+    workerId: WORKER_ID,
+    startsAt: SLOT_START.toISOString(),
+    endsAt: SLOT_END.toISOString(),
+  };
+
+  it("returns true when status is held and expires_at is in the past", () => {
+    const past = new Date(NOW.getTime() - 1000).toISOString();
+    expect(isHeldButExpired({ ...baseReservation, status: "held", expiresAt: past }, NOW)).toBe(true);
+  });
+
+  it("returns false when status is held and expires_at is in the future", () => {
+    const future = new Date(NOW.getTime() + 60_000).toISOString();
+    expect(isHeldButExpired({ ...baseReservation, status: "held", expiresAt: future }, NOW)).toBe(false);
+  });
+
+  it("returns false when status is confirmed even if expires_at is in the past", () => {
+    const past = new Date(NOW.getTime() - 1000).toISOString();
+    expect(isHeldButExpired({ ...baseReservation, status: "confirmed", expiresAt: past }, NOW)).toBe(false);
+  });
+
+  it("returns false when status is expired", () => {
+    const past = new Date(NOW.getTime() - 1000).toISOString();
+    expect(isHeldButExpired({ ...baseReservation, status: "expired", expiresAt: past }, NOW)).toBe(false);
+  });
+});
+
+// ─── getReservation ───────────────────────────────────────────────────────────
+
+describe("getReservation", () => {
+  const FUTURE = new Date(NOW.getTime() + 60 * 60 * 1000).toISOString(); // 1h from now
+  const PAST = new Date(NOW.getTime() - 60 * 60 * 1000).toISOString();   // 1h ago
+
+  it("returns not_found when reservation does not exist", async () => {
+    state = { reservationById: null };
+    const result = await getReservation("res-nonexistent", NOW);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error).toBe("not_found");
+  });
+
+  it("returns the reservation with wasLazilyExpired=false when held and not expired", async () => {
+    state = {
+      reservationById: {
+        id: "res-001", job_id: JOB_ID, worker_id: WORKER_ID,
+        status: "held", starts_at: SLOT_START.toISOString(),
+        ends_at: SLOT_END.toISOString(), expires_at: FUTURE,
+      },
+    };
+    const result = await getReservation("res-001", NOW);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.reservation.status).toBe("held");
+    expect(result.wasLazilyExpired).toBe(false);
+  });
+
+  it("returns the reservation with status=expired and wasLazilyExpired=true when hold has passed", async () => {
+    state = {
+      reservationById: {
+        id: "res-old", job_id: JOB_ID, worker_id: WORKER_ID,
+        status: "held", starts_at: SLOT_START.toISOString(),
+        ends_at: SLOT_END.toISOString(), expires_at: PAST,
+      },
+      // expireReservation will call .select().eq().single() for the same table
+      // so reservationForRelease feeds it the record it needs
+      reservationForRelease: {
+        id: "res-old", job_id: JOB_ID, status: "held",
+      },
+    };
+    const result = await getReservation("res-old", NOW);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.reservation.status).toBe("expired");
+    expect(result.wasLazilyExpired).toBe(true);
+  });
+
+  it("returns wasLazilyExpired=false for a reservation already in expired status", async () => {
+    state = {
+      reservationById: {
+        id: "res-already", job_id: JOB_ID, worker_id: WORKER_ID,
+        status: "expired", starts_at: SLOT_START.toISOString(),
+        ends_at: SLOT_END.toISOString(), expires_at: PAST,
+      },
+    };
+    const result = await getReservation("res-already", NOW);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.reservation.status).toBe("expired");
+    expect(result.wasLazilyExpired).toBe(false);
   });
 });

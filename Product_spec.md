@@ -311,7 +311,7 @@ The system must:
 ### 10. Reservation System
 
 - Support a temporary booking state
-- Expire unpaid reservations automatically
+- Expire unpaid reservations automatically — handled by lazy expiry on every reservation read and a periodic database sweep, with no external workflow engine required
 
 ### 11. Payment Integration
 

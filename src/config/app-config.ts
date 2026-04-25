@@ -11,7 +11,13 @@ export type AppConfig = {
       apiKey: string;
       summaryModel: string;
     };
+    stripe: {
+      secretKey: string;
+      publishableKey: string;
+      webhookSecret: string;
+    };
   };
+  appUrl: string;
   intakeToken: {
     secret: string;
     expiryMinutes: number;
@@ -67,7 +73,13 @@ export function createAppConfig(environment: Environment): AppConfig {
         apiKey: environment.OPENAI_API_KEY ?? "",
         summaryModel: environment.OPENAI_SUMMARY_MODEL ?? "gpt-4.1-mini",
       },
+      stripe: {
+        secretKey: environment.STRIPE_SECRET_KEY ?? "",
+        publishableKey: environment.STRIPE_PUBLISHABLE_KEY ?? "",
+        webhookSecret: environment.STRIPE_WEBHOOK_SECRET ?? "",
+      },
     },
+    appUrl: environment.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
     intakeToken: {
       secret: environment.INTAKE_TOKEN_SECRET ?? "",
       expiryMinutes: readNumber(environment, "INTAKE_TOKEN_EXPIRY_MINUTES", 30),

@@ -46,6 +46,30 @@ let mockJobData: MockJobData = null;
 let mockCustomerData: MockCustomerData = null;
 let mockUpdateError: { message: string } | null = null;
 
+// Stripe mock — returns a fake Checkout Session so happy-path tests pass
+vi.mock("@/server/stripe/client", () => ({
+  getStripeClient: () => ({
+    checkout: {
+      sessions: {
+        create: vi.fn().mockResolvedValue({
+          id: "cs_test_demo",
+          url: "https://checkout.stripe.com/pay/cs_test_demo",
+        }),
+      },
+    },
+  }),
+}));
+
+vi.mock("@/config/app-config", () => ({
+  appConfig: {
+    appUrl: "http://localhost:3000",
+    pricingDefaults: { calloutFeePence: 8000, currency: "gbp" },
+    serviceCredentials: {
+      stripe: { secretKey: "sk_test_mock", publishableKey: "", webhookSecret: "" },
+    },
+  },
+}));
+
 vi.mock("@/server/supabase/client", () => ({
   createSupabaseServiceClient: () => ({
     from: (table: string) => ({
@@ -60,12 +84,24 @@ vi.mock("@/server/supabase/client", () => ({
             if (table === "customers") {
               return { data: mockCustomerData, error: null };
             }
+            if (table === "payments") {
+              return { data: null, error: { message: "not found" } };
+            }
             return { data: null, error: null };
           },
         }),
       }),
+      insert: () => ({
+        select: () => ({
+          single: async () => ({ data: { id: "pay-demo-001" }, error: null }),
+        }),
+      }),
       update: () => ({
-        eq: () => Promise.resolve({ error: mockUpdateError }),
+        eq: () => ({
+          eq: () => Promise.resolve({ error: mockUpdateError }),
+          then: (resolve: (v: unknown) => void) =>
+            resolve({ error: mockUpdateError }),
+        }),
       }),
     }),
   }),
@@ -116,6 +152,8 @@ function pricedJobRow(
     id: "job-demo-001",
     status: "priced",
     customer_id: "cust-demo-001",
+    reservation_id: null,
+    payment_id: null,
     price_estimate: estimate,
     call_sessions: [
       { id: "sess-demo-001", intake_form_completed_at: "2024-01-01T10:00:00Z" },

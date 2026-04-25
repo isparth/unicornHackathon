@@ -25,7 +25,14 @@
  * expireReservation(reservationId):
  *   - Sets reservation status to 'expired'.
  *   - Moves job to 'expired' state.
- *   - Used by the Inngest expiry workflow (Milestone 4).
+ *   - Called by the Supabase cron sweep and directly in tests.
+ *
+ * getReservation(reservationId) — lazy expiry:
+ *   - Reads a reservation from the DB.
+ *   - If status is 'held' but expires_at < now, immediately expires it in
+ *     the DB and returns the record with status 'expired'.
+ *   - This is the primary correctness guarantee: an expired slot can never
+ *     appear as available even if the cron sweep hasn't run yet.
  *
  * All writes are idempotent where possible.
  */
@@ -67,8 +74,22 @@ export type ExpireReservationResult =
   | { success: true }
   | { success: false; error: "not_found" | "db_error"; message: string };
 
+export type GetReservationResult =
+  | { success: true; reservation: ReservationRecord; wasLazilyExpired: boolean }
+  | { success: false; error: "not_found" | "db_error"; message: string };
+
 // Job statuses that are allowed to receive a reservation
 const RESERVABLE_STATUSES = new Set(["priced", "slot_held"]);
+
+// ─── Lazy expiry helper ───────────────────────────────────────────────────────
+
+/**
+ * Returns true if a reservation is in 'held' status but its expires_at
+ * timestamp is in the past relative to `now`.
+ */
+export function isHeldButExpired(reservation: ReservationRecord, now: Date = new Date()): boolean {
+  return reservation.status === "held" && new Date(reservation.expiresAt) < now;
+}
 
 // ─── Overlap check ────────────────────────────────────────────────────────────
 
@@ -82,13 +103,16 @@ export async function hasOverlappingReservation(
   startsAt: Date,
   endsAt: Date,
   excludeReservationId?: string,
+  now: Date = new Date(),
 ): Promise<boolean> {
   const supabase = createSupabaseServiceClient();
 
-  // Check active reservations
+  // Check active reservations — exclude held reservations that have already
+  // expired (lazy expiry: treat them as non-blocking even if the cron sweep
+  // hasn't cleaned them up yet).
   let resQuery = supabase
     .from("reservations")
-    .select("id")
+    .select("id, status, expires_at")
     .eq("worker_id", workerId)
     .in("status", ["held", "confirmed"])
     .lt("starts_at", endsAt.toISOString())
@@ -99,7 +123,15 @@ export async function hasOverlappingReservation(
   }
 
   const { data: conflictingReservations } = await resQuery;
-  if (conflictingReservations && conflictingReservations.length > 0) return true;
+
+  // Filter out held reservations whose hold window has already passed
+  const activeConflicts = (conflictingReservations ?? []).filter((r) => {
+    const row = r as { status: string; expires_at: string };
+    if (row.status === "held" && new Date(row.expires_at) < now) return false;
+    return true;
+  });
+
+  if (activeConflicts.length > 0) return true;
 
   // Check confirmed jobs
   const { data: conflictingJobs } = await supabase
@@ -162,8 +194,13 @@ export async function createReservation(
       .single();
 
     const r = existingRes as RawReservationRow | null;
+
+    // Treat a held-but-expired record as if it doesn't exist — fall through
+    // to create a fresh reservation rather than returning a stale one.
+    const isStillActive = r && new Date(r.expires_at) >= now;
+
     if (
-      r &&
+      isStillActive &&
       r.worker_id === workerId &&
       new Date(r.starts_at).getTime() === startsAt.getTime()
     ) {
@@ -174,12 +211,15 @@ export async function createReservation(
       };
     }
 
-    // Different slot requested — release the previous held reservation
-    await supabase
-      .from("reservations")
-      .update({ status: "released", updated_at: now.toISOString() })
-      .eq("id", existingReservationId)
-      .eq("status", "held");
+    // Different slot, different worker, or hold expired — release/expire the previous reservation
+    if (r) {
+      const newStatus = new Date(r.expires_at) < now ? "expired" : "released";
+      await supabase
+        .from("reservations")
+        .update({ status: newStatus, updated_at: now.toISOString() })
+        .eq("id", existingReservationId)
+        .eq("status", "held");
+    }
   }
 
   // 3. Verify worker exists and is active
@@ -272,6 +312,53 @@ export async function createReservation(
     reservation: mapReservationRow(newRes as RawReservationRow),
     alreadyDone: false,
   };
+}
+
+// ─── getReservation (lazy expiry) ─────────────────────────────────────────────
+
+/**
+ * Read a reservation by ID, applying lazy expiry on the way out.
+ *
+ * If the reservation is 'held' but its expires_at is in the past, this
+ * function immediately triggers expireReservation() in the DB and returns
+ * the record with status 'expired' and wasLazilyExpired: true.
+ *
+ * Callers never see a stale 'held' record — correctness is enforced at
+ * read time without waiting for the cron sweep.
+ */
+export async function getReservation(
+  reservationId: string,
+  now: Date = new Date(),
+): Promise<GetReservationResult> {
+  const supabase = createSupabaseServiceClient();
+
+  const { data, error } = await supabase
+    .from("reservations")
+    .select("id, job_id, worker_id, status, starts_at, ends_at, expires_at")
+    .eq("id", reservationId)
+    .single();
+
+  if (error || !data) {
+    return { success: false, error: "not_found", message: `Reservation not found: ${reservationId}` };
+  }
+
+  const raw = data as RawReservationRow;
+  const reservation = mapReservationRow(raw);
+
+  // Lazy expiry: if held but the window has passed, expire it now
+  if (isHeldButExpired(reservation, now)) {
+    const expireResult = await expireReservation(reservationId, now);
+    if (!expireResult.success) {
+      return { success: false, error: "db_error", message: `Failed to lazily expire reservation: ${expireResult.message}` };
+    }
+    return {
+      success: true,
+      reservation: { ...reservation, status: "expired" },
+      wasLazilyExpired: true,
+    };
+  }
+
+  return { success: true, reservation, wasLazilyExpired: false };
 }
 
 // ─── releaseReservation ───────────────────────────────────────────────────────
