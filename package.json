@@ -1,0 +1,40 @@
+{
+  "name": "ai-job-intake-booking-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --check .",
+    "db:reset": "supabase db reset",
+    "db:seed": "supabase db reset"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.104.1",
+    "next": "16.2.4",
+    "react": "19.2.5",
+    "react-dom": "19.2.5"
+  },
+  "overrides": {
+    "postcss": "8.5.10"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.2.4",
+    "@types/node": "24.10.2",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.2",
+    "eslint-config-next": "16.2.4",
+    "prettier": "3.7.4",
+    "supabase": "^2.95.3",
+    "tailwindcss": "4.2.4",
+    "typescript": "6.0.3",
+    "vitest": "4.1.5"
+  }
+}

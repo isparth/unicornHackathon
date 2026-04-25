@@ -1,0 +1,9 @@
+alter table service_businesses enable row level security;
+alter table customers enable row level security;
+alter table workers enable row level security;
+alter table jobs enable row level security;
+alter table call_sessions enable row level security;
+alter table availability_windows enable row level security;
+alter table reservations enable row level security;
+alter table payments enable row level security;
+alter table uploaded_assets enable row level security;
