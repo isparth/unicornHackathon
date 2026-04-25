@@ -1,5 +1,7 @@
 import type {
+  imageAnalysisStatuses,
   jobStatuses,
+  outboundMessageTypes,
   paymentStatuses,
   reservationStatuses,
   uploadedAssetTypes,
@@ -13,6 +15,8 @@ export type WorkerSkill = (typeof workerSkills)[number];
 export type PaymentStatus = (typeof paymentStatuses)[number];
 export type ReservationStatus = (typeof reservationStatuses)[number];
 export type UploadedAssetType = (typeof uploadedAssetTypes)[number];
+export type ImageAnalysisStatus = (typeof imageAnalysisStatuses)[number];
+export type OutboundMessageType = (typeof outboundMessageTypes)[number];
 
 export type EntityId = string;
 
@@ -78,6 +82,9 @@ export type Job = {
   selectedSlotStartsAt?: string | null;
   selectedSlotEndsAt?: string | null;
   priceEstimate?: PriceEstimate | null;
+  // Image analysis — set by image-analysis-service; never overwrites form data
+  imageAnalysisStatus?: ImageAnalysisStatus | null;
+  imageAnalysisContext?: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -133,8 +140,21 @@ export type UploadedAsset = {
   callSessionId: EntityId | null;
   type: UploadedAssetType;
   storagePath: string;
-  analysisStatus: string | null;
+  analysisStatus: ImageAnalysisStatus | null;
   analysisResult: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OutboundMessage = {
+  id: EntityId;
+  callSessionId: EntityId;
+  jobId: EntityId | null;
+  recipientPhone: string;
+  messageType: OutboundMessageType;
+  messageBody: string;
+  deliveryMetadata: Record<string, unknown>;
+  delivered: boolean | null;
   createdAt: string;
   updatedAt: string;
 };

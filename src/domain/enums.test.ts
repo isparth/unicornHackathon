@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  imageAnalysisStatuses,
   jobStatuses,
+  outboundMessageTypes,
   paymentStatuses,
   reservationStatuses,
   uploadedAssetTypes,
@@ -34,5 +36,23 @@ describe("domain enum mappings", () => {
     ]);
     expect(workerSkills).toEqual(["plumbing", "heating", "electrical"]);
     expect(uploadedAssetTypes).toEqual(["image", "transcript", "document"]);
+  });
+
+  it("defines image_analysis_status enum matching the DB type (milestone 5)", () => {
+    expect(imageAnalysisStatuses).toEqual([
+      "pending",
+      "processing",
+      "done",
+      "failed",
+    ]);
+  });
+
+  it("defines outbound_message_type enum matching the SMS service templates (milestone 5)", () => {
+    expect(outboundMessageTypes).toEqual([
+      "intake_form_link",
+      "image_upload_link",
+      "payment_link",
+      "booking_confirmation",
+    ]);
   });
 });

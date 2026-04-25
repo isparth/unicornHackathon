@@ -28,3 +28,17 @@ export const reservationStatuses = [
 export const workerSkills = ["plumbing", "heating", "electrical"] as const;
 
 export const uploadedAssetTypes = ["image", "transcript", "document"] as const;
+
+export const imageAnalysisStatuses = [
+  "pending",
+  "processing",
+  "done",
+  "failed",
+] as const;
+
+export const outboundMessageTypes = [
+  "intake_form_link",
+  "image_upload_link",
+  "payment_link",
+  "booking_confirmation",
+] as const;
