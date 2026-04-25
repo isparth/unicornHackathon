@@ -64,7 +64,23 @@ export class TwilioSmsProvider implements SmsProvider {
           error: "TWILIO_FROM_NUMBER is not configured.",
         };
       }
-      const message = await twilio.messages.create({ to, from, body });
+
+      // If the from number is the WhatsApp sandbox (+14155238886) or any
+      // whatsapp:-prefixed address, send via WhatsApp channel.
+      // Both to and from must carry the "whatsapp:" prefix for the Twilio API.
+      const isWhatsApp = from === "+14155238886" || from.startsWith("whatsapp:");
+      const resolvedFrom = isWhatsApp
+        ? `whatsapp:${from.replace(/^whatsapp:/, "")}`
+        : from;
+      const resolvedTo = isWhatsApp
+        ? `whatsapp:${to.replace(/^whatsapp:/, "")}`
+        : to;
+
+      const message = await twilio.messages.create({
+        to: resolvedTo,
+        from: resolvedFrom,
+        body,
+      });
       return {
         success: true,
         provider: this.name,
