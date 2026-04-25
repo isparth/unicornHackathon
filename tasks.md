@@ -127,31 +127,31 @@ This milestone establishes the three distinct sources of information that togeth
 
 ### Scheduling Service
 
-- [ ] Implement worker matching by required skill, basic service area, availability windows, and current job status.
-- [ ] Generate bookable time slots from availability windows while excluding confirmed jobs and active reservations.
-- [ ] Add deterministic slot selection rules so the same inputs produce predictable demo results.
+- [x] Implement worker matching by required skill, basic service area, availability windows, and current job status.
+- [x] Generate bookable time slots from availability windows while excluding confirmed jobs and active reservations.
+- [x] Add deterministic slot selection rules so the same inputs produce predictable demo results.
 
 ### Reservation Service
 
-- [ ] Create temporary reservations for selected slots and link them to jobs and workers.
-- [ ] Enforce reservation expiry timestamps using the configured hold duration.
-- [ ] Advance jobs to `slot_held` or `awaiting_payment` only when a reservation is successfully created.
+- [x] Create temporary reservations for selected slots and link them to jobs and workers.
+- [x] Enforce reservation expiry timestamps using the configured hold duration.
+- [x] Advance jobs to `slot_held` or `awaiting_payment` only when a reservation is successfully created.
 
 ### Concurrency Protection
 
-- [ ] Add database-level protection or transactional logic to prevent overlapping active reservations and confirmed bookings for the same worker.
-- [ ] Make reservation creation idempotent for repeated customer or webhook actions where appropriate.
-- [ ] Add tests covering overlapping slot attempts and expired holds.
+- [x] Add database-level protection or transactional logic to prevent overlapping active reservations and confirmed bookings for the same worker.
+- [x] Make reservation creation idempotent for repeated customer or webhook actions where appropriate.
+- [x] Add tests covering overlapping slot attempts and expired holds.
 
 ### Dashboard Scheduling Data
 
-- [ ] Add backend queries for confirmed jobs, active reservations, open availability gaps, and worker calendars.
-- [ ] Return scheduling data in a shape that supports calendar, list, and job-detail views.
+- [x] Add backend queries for confirmed jobs, active reservations, open availability gaps, and worker calendars.
+- [x] Return scheduling data in a shape that supports calendar, list, and job-detail views.
 
 ### QA And Acceptance Coverage
 
-- [ ] Test skill matching, availability filtering, double-booking prevention, and reservation status changes.
-- [ ] Add demo scenarios for same-day, scheduled, and emergency jobs.
+- [x] Test skill matching, availability filtering, double-booking prevention, and reservation status changes.
+- [x] Add demo scenarios for same-day, scheduled, and emergency jobs.
 
 ### After this milestone, you can…
 
