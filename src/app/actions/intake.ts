@@ -25,9 +25,25 @@ export type IntakeFormFields = {
   additionalDetails: string;
 };
 
+/** Client-side photo attachment — base64 data URL + metadata */
+export type PhotoAttachment = {
+  /** data URL — e.g. "data:image/jpeg;base64,..." */
+  dataUrl: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
+export const PHOTO_LIMITS = {
+  maxCount: 5,
+  maxTotalBytes: 10 * 1024 * 1024, // 10 MB
+  maxSingleBytes: 5 * 1024 * 1024,  // 5 MB per file
+  acceptedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"],
+} as const;
+
 export type SubmitIntakeFormResult =
   | { success: true }
-  | { success: false; error: "token_invalid" | "token_expired" | "server_error"; message: string };
+  | { success: false; error: "token_invalid" | "token_expired" | "photo_limit" | "server_error"; message: string };
 
 /**
  * Validate form fields and return a map of field-level error messages.
@@ -66,8 +82,42 @@ export function validateIntakeFields(
 export async function submitIntakeForm(
   token: string,
   fields: IntakeFormFields,
+  photos: PhotoAttachment[] = [],
 ): Promise<SubmitIntakeFormResult> {
-  // 1. Verify the token
+  // 1a. Server-side photo limit enforcement (defence-in-depth over client checks)
+  if (photos.length > PHOTO_LIMITS.maxCount) {
+    return {
+      success: false,
+      error: "photo_limit",
+      message: `You can attach a maximum of ${PHOTO_LIMITS.maxCount} photos.`,
+    };
+  }
+  const totalBytes = photos.reduce((sum, p) => sum + p.sizeBytes, 0);
+  if (totalBytes > PHOTO_LIMITS.maxTotalBytes) {
+    return {
+      success: false,
+      error: "photo_limit",
+      message: "Total photo size exceeds the 10 MB limit. Please remove some photos.",
+    };
+  }
+  for (const photo of photos) {
+    if (!PHOTO_LIMITS.acceptedMimeTypes.includes(photo.mimeType as typeof PHOTO_LIMITS.acceptedMimeTypes[number])) {
+      return {
+        success: false,
+        error: "photo_limit",
+        message: `File "${photo.fileName}" is not a supported image type.`,
+      };
+    }
+    if (photo.sizeBytes > PHOTO_LIMITS.maxSingleBytes) {
+      return {
+        success: false,
+        error: "photo_limit",
+        message: `File "${photo.fileName}" exceeds the 5 MB per-photo limit.`,
+      };
+    }
+  }
+
+  // 1b. Verify the token
   const result = verifyIntakeToken(token, appConfig.intakeToken.secret);
   if (!result.valid) {
     return {
@@ -226,7 +276,23 @@ export async function submitIntakeForm(
       .eq("id", sessionId);
   }
 
-  // 5. Mark the intake form as complete on the call session
+  // 5. Store photo metadata as uploaded_asset records (best-effort — don't block on failure)
+  if (photos.length > 0) {
+    const resolvedJobId = jobId ?? (session.job_id as string | null);
+    for (const photo of photos) {
+      // Store the base64 data URL as the storage_path for now.
+      // In Milestone 5 this will be replaced with a real Supabase Storage upload.
+      await supabase.from("uploaded_assets").insert({
+        job_id: resolvedJobId,
+        call_session_id: sessionId,
+        type: "image",
+        storage_path: photo.dataUrl,
+        analysis_status: "pending",
+      });
+    }
+  }
+
+  // 6. Mark the intake form as complete on the call session
   // (skipped if it was already marked — idempotent)
   if (!session.intake_form_completed_at) {
     await markIntakeFormComplete(sessionId);
