@@ -460,18 +460,23 @@ async function dispatchToolCall(
       // ── create-call-session ─────────────────────────────────────────────
       case "createCallSession":
       case "create-call-session": {
-        const vapiCallId = (parameters.vapiCallId as string | undefined) ?? event.call?.id ?? "";
-        const serviceBusinessId = parameters.serviceBusinessId as string | undefined;
+        // Always prefer real call context over LLM-supplied values, which may
+        // be placeholder strings when the LLM doesn't have access to them.
+        const vapiCallId = event.call?.id ?? (parameters.vapiCallId as string | undefined) ?? "";
         const phoneNumber =
-          (parameters.phoneNumber as string | undefined) ??
           event.call?.customer?.number ??
+          (parameters.phoneNumber as string | undefined) ??
           "";
+        const { appConfig } = await import("@/config/app-config");
+        const serviceBusinessId =
+          (parameters.serviceBusinessId as string | undefined) ??
+          appConfig.defaultBusinessId;
 
-        if (!vapiCallId || !serviceBusinessId || !phoneNumber) {
+        if (!vapiCallId || !phoneNumber) {
           resultPayload = {
             success: false,
             error: "bad_request",
-            message: "Missing vapiCallId, serviceBusinessId, or phoneNumber.",
+            message: `Missing call context. vapiCallId="${vapiCallId}" phoneNumber="${phoneNumber}"`,
           };
           break;
         }

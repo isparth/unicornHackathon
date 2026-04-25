@@ -27,6 +27,8 @@ export type AppConfig = {
     };
   };
   appUrl: string;
+  /** UUID of the default service business — used when the caller doesn't supply one. */
+  defaultBusinessId: string;
   intakeToken: {
     secret: string;
     expiryMinutes: number;
@@ -98,6 +100,9 @@ export function createAppConfig(environment: Environment): AppConfig {
       },
     },
     appUrl: environment.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+    defaultBusinessId:
+      environment.DEFAULT_SERVICE_BUSINESS_ID ??
+      "00000000-0000-4000-8000-000000000001",
     intakeToken: {
       secret: environment.INTAKE_TOKEN_SECRET ?? "",
       expiryMinutes: readNumber(environment, "INTAKE_TOKEN_EXPIRY_MINUTES", 30),
