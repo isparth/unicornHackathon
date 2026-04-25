@@ -93,9 +93,9 @@ This milestone establishes the three distinct sources of information that togeth
 
 ### Pricing Service
 
-- [ ] Implement configurable pricing rules for fixed call-out fees and estimated repair ranges by trade, category, and urgency.
-- [ ] Generate a customer-facing explanation that clearly distinguishes the call-out fee from the non-guaranteed repair range.
-- [ ] Store pricing data on the job in a structured format suitable for dashboard display and payment creation.
+- [x] Implement configurable pricing rules for fixed call-out fees and estimated repair ranges by trade, category, and urgency.
+- [x] Generate a customer-facing explanation that clearly distinguishes the call-out fee from the non-guaranteed repair range.
+- [x] Store pricing data on the job in a structured format suitable for dashboard display and payment creation.
 
 ### Hard Gate: Form Before Payment
 
