@@ -28,6 +28,7 @@ vi.mock("@/config/app-config", () => ({
     pricingDefaults: { calloutFeePence: 8000, currency: "gbp" },
     serviceCredentials: {
       stripe: { secretKey: "sk_test_mock", publishableKey: "", webhookSecret: "" },
+      twilio: { accountSid: "", authToken: "", fromNumber: "" },
     },
   },
 }));

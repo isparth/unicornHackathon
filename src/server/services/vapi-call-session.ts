@@ -16,6 +16,7 @@
 import { createSupabaseServiceClient } from "@/server/supabase/client";
 import { issueIntakeFormToken } from "./call-session-service";
 import { appConfig } from "@/config/app-config";
+import { smsService } from "./sms-service";
 
 export type CreateCallSessionParams = {
   vapiCallId: string;
@@ -53,14 +54,17 @@ export async function createCallSessionFromVapi(
   // 1. Idempotency — reuse existing session if present
   const { data: existing } = await supabase
     .from("call_sessions")
-    .select("id")
+    .select("id, job_id")
     .eq("provider_session_id", vapiCallId)
     .maybeSingle();
 
   let sessionId: string;
+  let sessionJobId: string | null = null;
 
   if (existing) {
-    sessionId = (existing as { id: string }).id;
+    const row = existing as { id: string; job_id: string | null };
+    sessionId = row.id;
+    sessionJobId = row.job_id;
   } else {
     // 2a. Create customer stub
     const { data: customerData, error: customerError } = await supabase
@@ -94,7 +98,8 @@ export async function createCallSessionFromVapi(
       };
     }
 
-    const jobId = (jobData as { id: string }).id;
+    const newJobId = (jobData as { id: string }).id;
+    sessionJobId = newJobId;
 
     // 2c. Create call session
     const { data: sessionData, error: sessionError } = await supabase
@@ -102,7 +107,7 @@ export async function createCallSessionFromVapi(
       .insert({
         service_business_id: serviceBusinessId,
         customer_id: customerId,
-        job_id: jobId,
+        job_id: newJobId,
         provider_session_id: vapiCallId,
         extraction_status: "pending",
       })
@@ -134,6 +139,20 @@ export async function createCallSessionFromVapi(
 
   const baseUrl = appConfig.appUrl;
   const intakeFormUrl = `${baseUrl}/intake/${tokenResult.token}`;
+
+  // 4. Send the intake form link via WhatsApp (fire-and-forget — a failed send
+  //    must never block the call session creation response).
+  smsService
+    .sendIntakeFormLink({
+      to: phoneNumber,
+      callSessionId: sessionId,
+      jobId: sessionJobId,
+      customerName: null, // name not yet collected at call-start
+      intakeFormUrl,
+    })
+    .catch((err: unknown) => {
+      console.error("[vapi-call-session] WhatsApp intake link send failed:", err);
+    });
 
   return {
     success: true,

@@ -32,6 +32,7 @@
  */
 
 import { createSupabaseServiceClient } from "@/server/supabase/client";
+import { smsService } from "./sms-service";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -126,6 +127,67 @@ export async function handleCheckoutSessionCompleted(
       .eq("id", reservationId)
       .eq("status", "held"); // only update if still held
   }
+
+  // 6. Send booking confirmation via WhatsApp (fire-and-forget).
+  //    Look up customer phone, customer name, worker name, and slot times.
+  (async () => {
+    try {
+      // Fetch customer contact info via the job
+      const { data: jobRow } = await supabase
+        .from("jobs")
+        .select("customers(name, phone_number), call_sessions(id)")
+        .eq("id", jobId)
+        .single();
+
+      const j = jobRow as {
+        customers: { name: string | null; phone_number: string | null } | null;
+        call_sessions: Array<{ id: string }>;
+      } | null;
+
+      const phoneNumber = j?.customers?.phone_number;
+      if (!phoneNumber) return; // no phone — can't send
+
+      const callSessionId = j?.call_sessions?.[0]?.id ?? null;
+      if (!callSessionId) return; // no session to attribute message to
+
+      // Fetch slot times and worker name from the reservation
+      let workerName = "your engineer";
+      let slotStartsAt = "";
+      let slotEndsAt = "";
+
+      if (reservationId) {
+        const { data: resRow } = await supabase
+          .from("reservations")
+          .select("starts_at, ends_at, workers(name)")
+          .eq("id", reservationId)
+          .single();
+
+        const r = resRow as {
+          starts_at: string;
+          ends_at: string;
+          workers: { name: string | null } | null;
+        } | null;
+
+        if (r) {
+          slotStartsAt = r.starts_at;
+          slotEndsAt = r.ends_at;
+          workerName = r.workers?.name ?? "your engineer";
+        }
+      }
+
+      await smsService.sendBookingConfirmation({
+        to: phoneNumber,
+        callSessionId,
+        jobId,
+        customerName: j?.customers?.name ?? null,
+        workerName,
+        slotStartsAt,
+        slotEndsAt,
+      });
+    } catch (err) {
+      console.error("[webhook-service] WhatsApp booking confirmation send failed:", err);
+    }
+  })();
 
   return { success: true, alreadyProcessed: false };
 }

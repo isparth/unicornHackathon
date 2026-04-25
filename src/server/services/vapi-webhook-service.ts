@@ -28,7 +28,10 @@
  *    sends the *full* history.
  *
  *  tool-calls
- *    Delegated to the tool-call dispatcher (Task 5 — placeholder here).
+ *    Routed through the full tool-call dispatcher which handles all nine
+ *    registered tools: create-call-session, check-form-status, classify-job,
+ *    price-job, get-available-slots, hold-slot, create-payment-session,
+ *    summarise-call, generate-intake-token.
  *    Returns the results array Vapi expects synchronously.
  *
  * Non-event-specific rules:
@@ -404,6 +407,40 @@ export async function handleToolCalls(
 }
 
 /**
+ * Resolve a jobId from either a direct `jobId` parameter or a `sessionId`.
+ * Returns `{ jobId }` on success or `{ error, message }` on failure.
+ */
+async function resolveJobId(
+  parameters: Record<string, unknown>,
+): Promise<{ jobId: string } | { error: string; message: string }> {
+  const directJobId = parameters.jobId as string | undefined;
+  if (directJobId) return { jobId: directJobId };
+
+  const sessionId = parameters.sessionId as string | undefined;
+  if (!sessionId) {
+    return { error: "bad_request", message: "Missing jobId or sessionId." };
+  }
+
+  const supabase = createSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("call_sessions")
+    .select("job_id")
+    .eq("id", sessionId)
+    .single();
+
+  if (error || !data) {
+    return { error: "not_found", message: `Call session not found: ${sessionId}` };
+  }
+
+  const jobId = (data as { job_id: string | null }).job_id;
+  if (!jobId) {
+    return { error: "not_found", message: `Call session ${sessionId} has no linked job yet.` };
+  }
+
+  return { jobId };
+}
+
+/**
  * Dispatch a single tool call.
  *
  * Returns a VapiToolCallResult whose `result` field is a JSON string.
@@ -439,15 +476,195 @@ async function dispatchToolCall(
           break;
         }
 
-        // Call the internal route handler logic by hitting the service functions
-        // directly to avoid an internal HTTP round-trip.
         const { createCallSessionFromVapi } = await import("./vapi-call-session");
         resultPayload = await createCallSessionFromVapi({ vapiCallId, serviceBusinessId, phoneNumber });
         break;
       }
 
-      // ── All other tools ─────────────────────────────────────────────────
-      // Task 5 (tool-call dispatcher) will expand this list.
+      // ── check-form-status ───────────────────────────────────────────────
+      case "checkFormStatus":
+      case "check-form-status": {
+        const sessionId = parameters.sessionId as string | undefined;
+        const jobId = parameters.jobId as string | undefined;
+
+        if (!sessionId && !jobId) {
+          resultPayload = { success: false, error: "bad_request", message: "Missing sessionId or jobId." };
+          break;
+        }
+
+        const supabase = createSupabaseServiceClient();
+        let completedAt: string | null = null;
+        let resolvedJobId: string | null = jobId ?? null;
+
+        if (sessionId) {
+          const { data, error } = await supabase
+            .from("call_sessions")
+            .select("intake_form_completed_at, job_id")
+            .eq("id", sessionId)
+            .single();
+          if (error || !data) {
+            resultPayload = { success: false, error: "not_found", message: `Call session not found: ${sessionId}` };
+            break;
+          }
+          const row = data as { intake_form_completed_at: string | null; job_id: string | null };
+          completedAt = row.intake_form_completed_at;
+          resolvedJobId = row.job_id ?? resolvedJobId;
+        } else if (jobId) {
+          const { data } = await supabase
+            .from("call_sessions")
+            .select("intake_form_completed_at, job_id")
+            .eq("job_id", jobId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          const row = data as { intake_form_completed_at: string | null; job_id: string | null } | null;
+          completedAt = row?.intake_form_completed_at ?? null;
+          resolvedJobId = row?.job_id ?? jobId;
+        }
+
+        let jobStatus: string | null = null;
+        if (resolvedJobId) {
+          const { data: jobRow } = await createSupabaseServiceClient()
+            .from("jobs")
+            .select("status")
+            .eq("id", resolvedJobId)
+            .single();
+          jobStatus = (jobRow as { status: string } | null)?.status ?? null;
+        }
+
+        resultPayload = { success: true, completed: completedAt != null, completedAt, jobStatus };
+        break;
+      }
+
+      // ── classify-job ────────────────────────────────────────────────────
+      case "classifyJob":
+      case "classify-job": {
+        const resolved = await resolveJobId(parameters);
+        if ("error" in resolved) { resultPayload = { success: false, ...resolved }; break; }
+        const { classifyJob } = await import("./classification-service");
+        const result = await classifyJob(resolved.jobId);
+        resultPayload = result.success
+          ? { success: true, requiredSkill: result.classification.requiredSkill, urgency: result.classification.urgency, jobCategory: result.classification.jobCategory, alreadyDone: result.alreadyDone }
+          : { success: false, error: result.error, message: result.message };
+        break;
+      }
+
+      // ── price-job ───────────────────────────────────────────────────────
+      case "priceJob":
+      case "price-job": {
+        const resolved = await resolveJobId(parameters);
+        if ("error" in resolved) { resultPayload = { success: false, ...resolved }; break; }
+        const { priceJob } = await import("./pricing-service");
+        const result = await priceJob(resolved.jobId);
+        resultPayload = result.success
+          ? { success: true, calloutFeePence: result.estimate.calloutFeePence, repairEstimateMinPence: result.estimate.repairEstimateMinPence, repairEstimateMaxPence: result.estimate.repairEstimateMaxPence, currency: result.estimate.currency, explanation: result.estimate.explanation, alreadyDone: result.alreadyDone }
+          : { success: false, error: result.error, message: result.message };
+        break;
+      }
+
+      // ── get-available-slots ─────────────────────────────────────────────
+      case "getAvailableSlots":
+      case "get-available-slots": {
+        const resolved = await resolveJobId(parameters);
+        if ("error" in resolved) { resultPayload = { success: false, ...resolved }; break; }
+        const { getAvailableSlots } = await import("./scheduling-service");
+        const result = await getAvailableSlots(resolved.jobId);
+        if (!result.success) { resultPayload = { success: false, error: result.error, message: result.message }; break; }
+        const maxSlots = typeof parameters.maxSlots === "number" && parameters.maxSlots > 0 ? parameters.maxSlots : 5;
+        resultPayload = {
+          success: true,
+          slots: result.slots.slice(0, maxSlots).map((s) => ({
+            workerId: s.workerId,
+            workerName: s.workerName,
+            startsAt: s.startsAt.toISOString(),
+            endsAt: s.endsAt.toISOString(),
+          })),
+        };
+        break;
+      }
+
+      // ── hold-slot ───────────────────────────────────────────────────────
+      case "holdSlot":
+      case "hold-slot": {
+        const jobId = parameters.jobId as string | undefined;
+        const workerId = parameters.workerId as string | undefined;
+        const startsAtStr = parameters.startsAt as string | undefined;
+        const endsAtStr = parameters.endsAt as string | undefined;
+
+        if (!jobId || !workerId || !startsAtStr || !endsAtStr) {
+          resultPayload = { success: false, error: "bad_request", message: "Missing jobId, workerId, startsAt, or endsAt." };
+          break;
+        }
+
+        const startsAt = new Date(startsAtStr);
+        const endsAt = new Date(endsAtStr);
+
+        if (isNaN(startsAt.getTime()) || isNaN(endsAt.getTime())) {
+          resultPayload = { success: false, error: "bad_request", message: "startsAt and endsAt must be valid ISO timestamps." };
+          break;
+        }
+        if (endsAt <= startsAt) {
+          resultPayload = { success: false, error: "bad_request", message: "endsAt must be after startsAt." };
+          break;
+        }
+
+        const { createReservation } = await import("./reservation-service");
+        const result = await createReservation(jobId, workerId, startsAt, endsAt);
+        resultPayload = result.success
+          ? { success: true, reservationId: result.reservation.id, expiresAt: result.reservation.expiresAt, alreadyDone: result.alreadyDone }
+          : { success: false, error: result.error, message: result.message };
+        break;
+      }
+
+      // ── create-payment-session ──────────────────────────────────────────
+      case "createPaymentSession":
+      case "create-payment-session": {
+        const jobId = parameters.jobId as string | undefined;
+        if (!jobId) { resultPayload = { success: false, error: "bad_request", message: "Missing jobId." }; break; }
+        const { createPaymentSession } = await import("./payment-service");
+        const result = await createPaymentSession(jobId);
+        resultPayload = result.success
+          ? { success: true, jobId: result.jobId, paymentId: result.paymentId, paymentUrl: result.paymentUrl, amountPence: result.amountPence, currency: result.currency, alreadyDone: result.alreadyDone }
+          : { success: false, error: result.error, message: result.message };
+        break;
+      }
+
+      // ── summarise-call ──────────────────────────────────────────────────
+      case "summariseCall":
+      case "summarise-call": {
+        const sessionId = parameters.sessionId as string | undefined;
+        if (!sessionId) { resultPayload = { success: false, error: "bad_request", message: "Missing sessionId." }; break; }
+        const result = await generateCallSummary(sessionId);
+        resultPayload = result.success
+          ? { success: true, summary: result.summary, alreadyDone: result.alreadyDone }
+          : { success: false, error: result.error, message: result.message };
+        break;
+      }
+
+      // ── generate-intake-token ───────────────────────────────────────────
+      case "generateIntakeToken":
+      case "generate-intake-token": {
+        const sessionId = parameters.sessionId as string | undefined;
+        if (!sessionId) { resultPayload = { success: false, error: "bad_request", message: "Missing sessionId." }; break; }
+        const { issueIntakeFormToken } = await import("./call-session-service");
+        const { appConfig } = await import("@/config/app-config");
+        let tokenResult: { token: string; expiresAt: Date };
+        try {
+          tokenResult = await issueIntakeFormToken(sessionId);
+        } catch (err) {
+          resultPayload = { success: false, error: "token_error", message: err instanceof Error ? err.message : String(err) };
+          break;
+        }
+        resultPayload = {
+          success: true,
+          token: tokenResult.token,
+          intakeFormUrl: `${appConfig.appUrl}/intake/${tokenResult.token}`,
+          expiresAt: tokenResult.expiresAt.toISOString(),
+        };
+        break;
+      }
+
+      // ── unknown tool ────────────────────────────────────────────────────
       default: {
         resultPayload = {
           success: false,
