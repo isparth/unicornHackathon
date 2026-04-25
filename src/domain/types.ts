@@ -69,6 +69,7 @@ export type Job = {
   customerId: EntityId;
   status: JobStatus;
   problemSummary: string | null;
+  jobCategory: string | null;
   urgency: Urgency | null;
   requiredSkill: WorkerSkill | null;
   assignedWorkerId?: EntityId | null;

@@ -86,10 +86,10 @@ This milestone establishes the three distinct sources of information that togeth
 
 ### Classification Service
 
-- [ ] Build the classification flow that runs after `problem_summary` is written to the job.
-- [ ] Use `OpenAI` to determine problem category, required worker skill, and urgency from the call summary.
-- [ ] Validate AI outputs against allowed enum values before persisting or using them for state transitions.
-- [ ] Add fallback behavior for low-confidence or invalid model outputs so the job remains in `qualified` rather than progressing incorrectly.
+- [x] Build the classification flow that runs after `problem_summary` is written to the job.
+- [x] Use `OpenAI` to determine problem category, required worker skill, and urgency from the call summary.
+- [x] Validate AI outputs against allowed enum values before persisting or using them for state transitions.
+- [x] Add fallback behavior for low-confidence or invalid model outputs so the job remains in `qualified` rather than progressing incorrectly.
 
 ### Pricing Service
 
