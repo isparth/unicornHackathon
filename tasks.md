@@ -79,10 +79,10 @@ This milestone establishes the three distinct sources of information that togeth
 
 ### Call Summary Service
 
-- [ ] After the call transcript is available, use OpenAI to generate a concise, clean summary of what the customer described.
-- [ ] Store the summary as `problem_summary` on the job record.
-- [ ] This is the authoritative source of the problem description — it is what the worker reads before attending.
-- [ ] It must not be sourced from the form or overwritten by form submission.
+- [x] After the call transcript is available, use OpenAI to generate a concise, clean summary of what the customer described.
+- [x] Store the summary as `problem_summary` on the job record.
+- [x] This is the authoritative source of the problem description — it is what the worker reads before attending.
+- [x] It must not be sourced from the form or overwritten by form submission.
 
 ### Classification Service
 

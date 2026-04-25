@@ -7,6 +7,10 @@ export type AppConfig = {
       anonKey: string;
       serviceRoleKey: string;
     };
+    openai: {
+      apiKey: string;
+      summaryModel: string;
+    };
   };
   intakeToken: {
     secret: string;
@@ -27,6 +31,7 @@ const requiredKeys = [
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
   "INTAKE_TOKEN_SECRET",
+  "OPENAI_API_KEY",
 ] as const;
 
 function readNumber(
@@ -57,6 +62,10 @@ export function createAppConfig(environment: Environment): AppConfig {
         url: environment.NEXT_PUBLIC_SUPABASE_URL ?? "",
         anonKey: environment.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
         serviceRoleKey: environment.SUPABASE_SERVICE_ROLE_KEY ?? "",
+      },
+      openai: {
+        apiKey: environment.OPENAI_API_KEY ?? "",
+        summaryModel: environment.OPENAI_SUMMARY_MODEL ?? "gpt-4.1-mini",
       },
     },
     intakeToken: {
