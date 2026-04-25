@@ -112,8 +112,8 @@ This milestone establishes the three distinct sources of information that togeth
 
 - [x] Add tests for token generation, token expiry, and form field validation.
 - [x] Add tests for submission idempotency.
-- [ ] Add tests for classification mapping, pricing rule selection, and the hard gate that blocks payment when the form is incomplete.
-- [ ] Add a demo fixture that simulates a complete mid-call form submission for boiler failure, leak investigation, and electrical fault scenarios.
+- [x] Add tests for classification mapping, pricing rule selection, and the hard gate that blocks payment when the form is incomplete.
+- [x] Add a demo fixture that simulates a complete mid-call form submission for boiler failure, leak investigation, and electrical fault scenarios.
 
 ### After this milestone, you can…
 
