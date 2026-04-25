@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateIntakeFields, type IntakeFormFields } from "./intake";
+import { validateIntakeFields, type IntakeFormFields } from "./intake-types";
 
 const validFields: IntakeFormFields = {
   name: "Sarah Jones",

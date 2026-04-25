@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useTransition, useRef, useCallback } from "react";
+import { submitIntakeForm } from "@/app/actions/intake";
 import {
-  submitIntakeForm,
   validateIntakeFields,
   PHOTO_LIMITS,
   type IntakeFormFields,
   type PhotoAttachment,
   type SubmitIntakeFormResult,
-} from "@/app/actions/intake";
+} from "@/app/actions/intake-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
