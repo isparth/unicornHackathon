@@ -105,7 +105,7 @@ This milestone establishes the three distinct sources of information that togeth
 
 ### Backend Interfaces
 
-- [x] Add internal route handlers or server actions for creating call sessions, generating intake form tokens, triggering SMS delivery of the form link, and processing classification and pricing.
+- [x] Add internal route handlers or server actions for creating call sessions, generating intake form tokens, triggering WhatsApp delivery of the form link, and processing classification and pricing.
 - [x] Ensure missing required fields block progression to `qualified` or `priced` states.
 
 ### QA And Acceptance Coverage
@@ -168,7 +168,7 @@ This milestone establishes the three distinct sources of information that togeth
 - [x] Create Stripe Checkout or Payment Link sessions for the call-out fee tied to a job and reservation.
 - [x] Before creating the session, verify that the intake form has been submitted and all required customer fields are present — return an error if not.
 - [x] Store Stripe identifiers, payment amount, payment status, and related metadata in the payment table.
-- [x] Generate a secure customer payment URL that can be sent by SMS or displayed in a demo flow.
+- [x] Generate a secure customer payment URL that can be sent by WhatsApp or displayed in a demo flow.
 
 ### Stripe Webhooks
 
@@ -185,7 +185,7 @@ This milestone establishes the three distinct sources of information that togeth
 ### Notification Hooks
 
 - [x] Define notification events for payment requested, booking confirmed, payment failed, and reservation expired.
-- [x] Implement a placeholder notification service interface that can later be backed by Vapi SMS or another provider.
+- [x] Implement a placeholder notification service interface that can later be backed by WhatsApp or another provider.
 
 ### QA And Acceptance Coverage
 
@@ -202,9 +202,9 @@ This milestone establishes the three distinct sources of information that togeth
 - Demonstrate unpaid reservations expiring automatically via lazy check on read and a periodic Supabase cron sweep.
 - Show retry-safe behavior for repeated Stripe webhook events.
 
-## Milestone 5: Voice, SMS Handoff, And Image Analysis
+## Milestone 5: Voice, WhatsApp Handoff, And Image Analysis
 
-**Goal:** Connect the app-owned business flow to Vapi voice events, SMS handoffs for the intake form and payment link, and image analysis.
+**Goal:** Connect the app-owned business flow to Vapi voice events, WhatsApp message handoffs for the intake form and payment link, and image analysis.
 
 ### Vapi Voice Integration
 
@@ -214,16 +214,16 @@ This milestone establishes the three distinct sources of information that togeth
 
 ### Conversation Orchestration
 
-- [ ] Create backend actions the voice assistant can call for: triggering the intake form SMS, checking form completion status, running classification, generating pricing, offering slots, creating reservations, and creating the payment link.
+- [ ] Create backend actions the voice assistant can call for: triggering the intake form WhatsApp message, checking form completion status, running classification, generating pricing, offering slots, creating reservations, and creating the payment link.
 - [ ] The assistant must check form completion status before attempting to move to pricing or payment — the backend enforces this, but the assistant must be able to ask the customer to complete the form if it is not yet done.
 - [ ] Store transcripts, event history, and summaries for worker review.
 
-### SMS Handoff
+### WhatsApp Handoff
 
 - [ ] Implement message generation for intake form links, image upload links, payment links, and booking confirmations.
-- [ ] Wire SMS sending through Vapi where supported, or through a notification adapter with a mocked local fallback.
-- [ ] Track outbound messages and delivery-relevant metadata for troubleshooting.
-- [ ] Ensure the intake form SMS is sent immediately when a call session is created, not deferred.
+- [ ] Send all customer messages via WhatsApp using Twilio's WhatsApp Business API (sandbox number `+14155238886` for development; switchable to a production number via a single env var change).
+- [ ] Track outbound messages and delivery-relevant metadata in the `outbound_messages` table for troubleshooting.
+- [ ] Ensure the intake form WhatsApp message is sent immediately when a call session is created, not deferred.
 
 ### Image Analysis
 
@@ -233,13 +233,13 @@ This milestone establishes the three distinct sources of information that togeth
 
 ### QA And Acceptance Coverage
 
-- [ ] Test Vapi event ingestion, repeated transcript updates, intake form SMS generation, signed upload access, and image-analysis failure handling.
+- [ ] Test Vapi event ingestion, repeated transcript updates, intake form WhatsApp message generation, signed upload access, and image-analysis failure handling.
 - [ ] Run a mocked end-to-end call flow from call start through form submission, classification, pricing, slot selection, and payment link creation.
 - [ ] Verify the assistant correctly holds back from payment when the form is not yet complete.
 
 ### After this milestone, you can…
 
-- Demo the real call and SMS hybrid flow including the mid-call intake form handoff.
+- Demo the real call and WhatsApp hybrid flow including the mid-call intake form handoff.
 - Let customers upload images that enrich job context.
 - Show a natural conversation that still produces structured, state-controlled booking progress.
 
@@ -307,7 +307,7 @@ This milestone establishes the three distinct sources of information that togeth
 ### Reliability And Observability
 
 - [ ] Add structured logging for call sessions, intake form token generation, form submissions, classification attempts, reservation creation, payment events, webhook processing, and expiry workflows.
-- [ ] Add admin-visible error states for failed classification, failed image analysis, failed SMS delivery, failed payment creation, and blocked payment attempts due to incomplete intake.
+- [ ] Add admin-visible error states for failed classification, failed image analysis, failed WhatsApp delivery, failed payment creation, and blocked payment attempts due to incomplete intake.
 - [x] Ensure external webhook endpoints validate signatures or shared secrets where applicable.
 
 ### Security Baseline
@@ -322,7 +322,7 @@ This milestone establishes the three distinct sources of information that togeth
 
 - [ ] Create a repeatable demo reset process for data, workers, availability, and reservations.
 - [ ] Add sample call scripts and expected outcomes for the main acceptance scenarios.
-- [ ] Prepare environment setup notes for Vercel, Supabase, Stripe, Vapi, OpenAI, and Inngest.
+- [ ] Prepare environment setup notes for Vercel, Supabase, Stripe, Vapi, OpenAI, and Twilio WhatsApp.
 
 ### Polish And Usability
 

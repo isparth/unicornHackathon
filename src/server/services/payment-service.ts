@@ -31,6 +31,7 @@
 import { appConfig } from "@/config/app-config";
 import { getStripeClient } from "@/server/stripe/client";
 import { createSupabaseServiceClient } from "@/server/supabase/client";
+import { smsService } from "./sms-service";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -292,6 +293,40 @@ export async function createPaymentSession(
       message: `Payment created (${paymentId}) but failed to update job: ${jobUpdateError.message}`,
     };
   }
+
+  // 8. Send the payment link via WhatsApp (fire-and-forget).
+  //    Look up the customer's phone number and the linked call session.
+  (async () => {
+    try {
+      const { data: callSession } = await supabase
+        .from("call_sessions")
+        .select("id, customers(name, phone_number)")
+        .eq("job_id", jobId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const session = callSession as {
+        id: string;
+        customers: { name: string | null; phone_number: string | null } | null;
+      } | null;
+
+      const phoneNumber = session?.customers?.phone_number;
+      if (!phoneNumber) return; // no phone — can't send
+
+      await smsService.sendPaymentLink({
+        to: phoneNumber,
+        callSessionId: session.id,
+        jobId,
+        customerName: session.customers?.name ?? null,
+        paymentUrl: checkoutUrl,
+        amountPence,
+        currency,
+      });
+    } catch (err) {
+      console.error("[payment-service] WhatsApp payment link send failed:", err);
+    }
+  })();
 
   return {
     success: true,

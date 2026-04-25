@@ -16,6 +16,15 @@ export type AppConfig = {
       publishableKey: string;
       webhookSecret: string;
     };
+    twilio: {
+      accountSid: string;
+      authToken: string;
+      fromNumber: string;
+    };
+    vapi: {
+      apiKey: string;
+      webhookSecret: string;
+    };
   };
   appUrl: string;
   intakeToken: {
@@ -77,6 +86,15 @@ export function createAppConfig(environment: Environment): AppConfig {
         secretKey: environment.STRIPE_SECRET_KEY ?? "",
         publishableKey: environment.STRIPE_PUBLISHABLE_KEY ?? "",
         webhookSecret: environment.STRIPE_WEBHOOK_SECRET ?? "",
+      },
+      twilio: {
+        accountSid: environment.TWILIO_ACCOUNT_SID ?? "",
+        authToken: environment.TWILIO_AUTH_TOKEN ?? "",
+        fromNumber: environment.TWILIO_FROM_NUMBER ?? "",
+      },
+      vapi: {
+        apiKey: environment.VAPI_API_KEY ?? "",
+        webhookSecret: environment.VAPI_WEBHOOK_SECRET ?? "",
       },
     },
     appUrl: environment.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",

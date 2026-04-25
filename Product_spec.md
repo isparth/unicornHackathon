@@ -77,11 +77,11 @@ Example verbal exchange:
 
 ### 3. Intake Form Sent Mid-Call
 
-Immediately after the problem context is established, the AI sends a short intake form link to the customer's phone by SMS — while the call is still active.
+Immediately after the problem context is established, the AI sends a short intake form link to the customer's phone via WhatsApp — while the call is still active.
 
 The AI tells the customer:
 
-`I've just sent you a quick form by text — it takes less than a minute. Could you fill it in now while we're on the call?`
+`I've just sent you a quick form on WhatsApp — it takes less than a minute. Could you fill it in now while we're on the call?`
 
 The form collects:
 
@@ -161,7 +161,7 @@ Once the customer selects a slot, the system places a temporary hold on that boo
 
 ### 10. Payment Request
 
-Only after the intake form is fully submitted does the system send a payment link by SMS to collect the call-out fee.
+Only after the intake form is fully submitted does the system send a payment link via WhatsApp to collect the call-out fee.
 
 This is enforced at the system level — the payment link cannot be generated if the intake form is incomplete.
 
@@ -173,7 +173,7 @@ Supported payment methods in v1:
 
 Example:
 
-`To confirm your booking, please pay the £80 call-out fee using the secure link I've just sent.`
+`To confirm your booking, please pay the £80 call-out fee using the secure link I've just sent on WhatsApp.`
 
 ### 11. Booking Confirmation
 
@@ -249,7 +249,7 @@ The dashboard should show payment state linked to the booking:
 
 ### 2. Mid-Call Form Handoff
 
-The AI must send an intake form link by SMS at the start of every call and actively guide the customer to complete it during the call.
+The AI must send an intake form link via WhatsApp at the start of every call and actively guide the customer to complete it during the call.
 
 The form link must:
 
@@ -258,9 +258,9 @@ The form link must:
 - Expire after a configurable window
 - Be mobile-optimised and fast to complete
 
-### 3. Call + SMS Hybrid Flow
+### 3. Call + WhatsApp Hybrid Flow
 
-The system must support phone conversation plus outbound messages for:
+The system must support phone conversation plus outbound WhatsApp messages for:
 
 - Intake form link (sent mid-call)
 - Image upload link
@@ -321,7 +321,7 @@ The system must:
 
 ### 12. Notifications
 
-Customer notifications:
+Customer notifications (sent via WhatsApp):
 
 - Intake form link (mid-call)
 - Image upload prompt
@@ -352,8 +352,8 @@ The demo should show:
 2. The AI answers immediately
 3. The judge says, `My boiler isn't working`
 4. The AI asks two or three natural follow-up questions about the problem
-5. The AI says: `I've just sent you a quick form by text — fill it in now and we'll get you sorted`
-6. The judge opens the SMS, fills in their name and address on the form (and optionally adds a photo)
+5. The AI says: `I've just sent you a quick form on WhatsApp — fill it in now and we'll get you sorted`
+6. The judge opens the WhatsApp message, fills in their name and address on the form (and optionally adds a photo)
 7. The system generates an AI summary of the conversation and advances the job to qualified
 8. The AI provides a price expectation
 9. The AI offers available time slots
