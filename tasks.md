@@ -38,9 +38,19 @@
 - Demonstrate core job states and seeded workers without external integrations.
 - Build backend services and dashboard screens against stable types and schema.
 
-## Milestone 2: Mid-Call Intake Form, Classification, And Pricing
+## Milestone 2: Mid-Call Intake Form, Call Summary, Classification, And Pricing
 
-**Goal:** Replace AI transcript extraction with a customer-facing intake form sent mid-call, use the verified form data for classification, and produce a clear customer-facing price expectation.
+**Goal:** Collect customer identity details through a mid-call form, derive the problem description from the voice conversation via an AI-generated call summary, use that summary for classification, and produce a clear customer-facing price expectation.
+
+### Three Information Sources
+
+This milestone establishes the three distinct sources of information that together build the complete job record:
+
+| Source | What it provides | Owner |
+|---|---|---|
+| **Intake form** | Name, address, phone number confirmation, photos | Customer fills in mid-call |
+| **Voice conversation** | Problem description (`problem_summary`), urgency | AI summarises from transcript |
+| **Worker view** | All three combined | Dashboard shows form data + call summary + photos |
 
 ### Intake Form Token Service
 
@@ -53,23 +63,31 @@
 
 - Build the customer-facing intake form at `/intake/[token]` using Next.js app router.
 - The form must be mobile-optimised — assume it is always opened on a phone during a live call.
-- Fields: customer name, service address (line 1, city, postcode), phone number confirmation, problem description (free text), and any additional details.
+- Fields: customer name, service address (line 1, city, postcode), phone number confirmation, and optional photo upload (up to 5 photos).
+- The form must not ask the customer to describe the problem — they have already done so verbally.
 - The form must be completable in under 60 seconds with minimal typing effort.
 - Show a clear success state once the form is submitted so the customer knows it worked.
 
 ### Intake Form Submission Handler
 
 - Accept and validate form submissions via a server action.
-- Write verified fields directly to the `customers` and `jobs` tables.
+- Write verified contact fields directly to the `customers` table.
+- Upload photos to Supabase Storage (`job-photos` bucket) and create `uploaded_assets` records.
 - Mark the intake form as complete on the call session record with a completion timestamp.
-- Advance the job from `intake` to `qualified` once all required fields are present.
+- Advance the job from `intake` to `qualified` once all required contact fields are present.
 - Make submission idempotent — resubmitting the same token updates rather than duplicates the record.
+
+### Call Summary Service
+
+- After the call transcript is available, use OpenAI to generate a concise, clean summary of what the customer described.
+- Store the summary as `problem_summary` on the job record.
+- This is the authoritative source of the problem description — it is what the worker reads before attending.
+- It must not be sourced from the form or overwritten by form submission.
 
 ### Classification Service
 
-- Build the classification flow that runs after the intake form is submitted.
-- Use the verified problem description from the form as input — do not attempt to classify from raw transcript.
-- Use `OpenAI` to determine problem category, required worker skill, urgency, and generate a worker-facing issue summary.
+- Build the classification flow that runs after `problem_summary` is written to the job.
+- Use `OpenAI` to determine problem category, required worker skill, and urgency from the call summary.
 - Validate AI outputs against allowed enum values before persisting or using them for state transitions.
 - Add fallback behavior for low-confidence or invalid model outputs so the job remains in `qualified` rather than progressing incorrectly.
 

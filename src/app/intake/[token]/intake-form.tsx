@@ -28,8 +28,6 @@ const emptyFields: IntakeFormFields = {
   city: "",
   postcode: "",
   phoneNumber: "",
-  problemDescription: "",
-  additionalDetails: "",
 };
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -266,29 +264,6 @@ export function IntakeForm({ token }: Props) {
             </Field>
           </div>
         </div>
-
-        {/* ── Section: The problem ──────────────────────── */}
-        <SectionLabel>The problem</SectionLabel>
-
-        <Field id="problemDescription" label="What's going on?" error={fieldErrors.problemDescription}>
-          <textarea
-            id="problemDescription" name="problemDescription"
-            rows={3} value={fields.problemDescription}
-            onChange={handleChange}
-            placeholder="e.g. Boiler showing error code E2, no hot water since this morning"
-            className={`${inputCls(!!fieldErrors.problemDescription)} resize-none`}
-          />
-        </Field>
-
-        <Field id="additionalDetails" label="Anything else useful?" hint="Optional" error={undefined}>
-          <textarea
-            id="additionalDetails" name="additionalDetails"
-            rows={2} value={fields.additionalDetails}
-            onChange={handleChange}
-            placeholder="e.g. Boiler is in the airing cupboard upstairs"
-            className={`${inputCls(false)} resize-none`}
-          />
-        </Field>
 
         {/* ── Section: Photos ───────────────────────────── */}
         <SectionLabel>

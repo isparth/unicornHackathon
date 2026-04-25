@@ -7,8 +7,6 @@ const validFields: IntakeFormFields = {
   city: "London",
   postcode: "N1 2AB",
   phoneNumber: "+44 7700 900123",
-  problemDescription: "Boiler not working, error code E2.",
-  additionalDetails: "",
 };
 
 describe("validateIntakeFields", () => {
@@ -76,29 +74,13 @@ describe("validateIntakeFields", () => {
     }
   });
 
-  it("returns an error when problemDescription is empty", () => {
-    const errors = validateIntakeFields({
-      ...validFields,
-      problemDescription: "",
-    });
-    expect(errors?.problemDescription).toBeDefined();
-  });
-
-  it("does not require additionalDetails", () => {
-    expect(
-      validateIntakeFields({ ...validFields, additionalDetails: "" }),
-    ).toBeNull();
-  });
-
   it("returns multiple errors at once when multiple fields are invalid", () => {
     const errors = validateIntakeFields({
       ...validFields,
       name: "",
       city: "",
-      problemDescription: "",
     });
     expect(errors?.name).toBeDefined();
     expect(errors?.city).toBeDefined();
-    expect(errors?.problemDescription).toBeDefined();
   });
 });

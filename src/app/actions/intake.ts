@@ -152,9 +152,11 @@ export async function submitIntakeForm(
       .eq("id", sessionId);
   }
 
-  // 4. Upsert the job record with problem description (idempotent)
+  // 4. Upsert the job record and advance to qualified (idempotent).
+  //    problem_summary is intentionally left blank here — it is populated by
+  //    the Call Summary Service after the transcript is available, not from the form.
   if (jobId) {
-    // Update existing job: write problem summary and advance to qualified
+    // Update existing job: advance to qualified if still in intake.
     // We only advance if currently in "intake" — later states are left alone.
     const { data: currentJob } = await supabase
       .from("jobs")
@@ -163,7 +165,6 @@ export async function submitIntakeForm(
       .single();
 
     const updates: Record<string, unknown> = {
-      problem_summary: fields.problemDescription.trim(),
       updated_at: new Date().toISOString(),
     };
 
@@ -185,14 +186,14 @@ export async function submitIntakeForm(
       };
     }
   } else {
-    // No job yet — create one in "qualified" state (all required fields are present)
+    // No job yet — create one in "qualified" state.
+    // problem_summary is left null; the Call Summary Service fills it from the transcript.
     const { data: newJob, error: jobInsertError } = await supabase
       .from("jobs")
       .insert({
         service_business_id: serviceBusinessId,
         customer_id: customerId,
         status: "qualified",
-        problem_summary: fields.problemDescription.trim(),
       })
       .select("id")
       .single();

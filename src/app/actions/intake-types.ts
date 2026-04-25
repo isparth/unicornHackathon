@@ -11,8 +11,6 @@ export type IntakeFormFields = {
   city: string;
   postcode: string;
   phoneNumber: string;
-  problemDescription: string;
-  additionalDetails: string;
 };
 
 /** Client-side photo attachment — base64 data URL + metadata */
@@ -62,9 +60,6 @@ export function validateIntakeFields(
   } else if (!phonePattern.test(fields.phoneNumber.trim())) {
     errors.phoneNumber = "Enter a valid phone number.";
   }
-
-  if (!fields.problemDescription.trim())
-    errors.problemDescription = "Please describe the problem.";
 
   return Object.keys(errors).length > 0 ? errors : null;
 }
