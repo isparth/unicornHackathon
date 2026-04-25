@@ -99,14 +99,14 @@ This milestone establishes the three distinct sources of information that togeth
 
 ### Hard Gate: Form Before Payment
 
-- [ ] Add a server-side check that blocks payment session creation if the intake form has not been submitted.
-- [ ] This check must live at the server action level — it cannot be UI-only.
-- [ ] Return a clear error state so the voice assistant or dashboard knows why payment creation was blocked.
+- [x] Add a server-side check that blocks payment session creation if the intake form has not been submitted.
+- [x] This check must live at the server action level — it cannot be UI-only.
+- [x] Return a clear error state so the voice assistant or dashboard knows why payment creation was blocked.
 
 ### Backend Interfaces
 
-- [ ] Add internal route handlers or server actions for creating call sessions, generating intake form tokens, triggering SMS delivery of the form link, and processing classification and pricing.
-- [ ] Ensure missing required fields block progression to `qualified` or `priced` states.
+- [x] Add internal route handlers or server actions for creating call sessions, generating intake form tokens, triggering SMS delivery of the form link, and processing classification and pricing.
+- [x] Ensure missing required fields block progression to `qualified` or `priced` states.
 
 ### QA And Acceptance Coverage
 
