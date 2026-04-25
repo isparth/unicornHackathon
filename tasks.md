@@ -38,21 +38,40 @@
 - Demonstrate core job states and seeded workers without external integrations.
 - Build backend services and dashboard screens against stable types and schema.
 
-## Milestone 2: Structured Intake, Classification, And Pricing
+## Milestone 2: Mid-Call Intake Form, Classification, And Pricing
 
-**Goal:** Convert call or transcript information into structured job data, classify the work, and produce a clear customer-facing price expectation.
+**Goal:** Replace AI transcript extraction with a customer-facing intake form sent mid-call, use the verified form data for classification, and produce a clear customer-facing price expectation.
 
-### Intake Service
+### Intake Form Token Service
 
-- Implement a transcript-to-structured-data service that extracts customer name, phone number, address, problem summary, urgency signals, and relevant issue details.
-- Support partial intake updates so the system can accumulate fields opportunistically across a conversation.
-- Store extraction results on the call session and linked job records with clear timestamps and status metadata.
+- Generate short-lived signed tokens tied to a call session when a call starts.
+- Store the token on the call session record with an expiry timestamp.
+- Validate tokens server-side on every form page load and submission — reject expired or unrecognised tokens.
+- Make token generation idempotent so that a repeated call-start event does not produce duplicate tokens.
 
-### OpenAI Classification
+### Intake Form Page
 
-- Build the OpenAI-backed classification flow for problem category, required worker skill, urgency, and worker-facing issue summary.
+- Build the customer-facing intake form at `/intake/[token]` using Next.js app router.
+- The form must be mobile-optimised — assume it is always opened on a phone during a live call.
+- Fields: customer name, service address (line 1, city, postcode), phone number confirmation, problem description (free text), and any additional details.
+- The form must be completable in under 60 seconds with minimal typing effort.
+- Show a clear success state once the form is submitted so the customer knows it worked.
+
+### Intake Form Submission Handler
+
+- Accept and validate form submissions via a server action.
+- Write verified fields directly to the `customers` and `jobs` tables.
+- Mark the intake form as complete on the call session record with a completion timestamp.
+- Advance the job from `intake` to `qualified` once all required fields are present.
+- Make submission idempotent — resubmitting the same token updates rather than duplicates the record.
+
+### Classification Service
+
+- Build the classification flow that runs after the intake form is submitted.
+- Use the verified problem description from the form as input — do not attempt to classify from raw transcript.
+- Use `OpenAI` to determine problem category, required worker skill, urgency, and generate a worker-facing issue summary.
 - Validate AI outputs against allowed enum values before persisting or using them for state transitions.
-- Add fallback behavior for low-confidence or invalid model outputs so the job remains in intake rather than progressing incorrectly.
+- Add fallback behavior for low-confidence or invalid model outputs so the job remains in `qualified` rather than progressing incorrectly.
 
 ### Pricing Service
 
@@ -60,21 +79,27 @@
 - Generate a customer-facing explanation that clearly distinguishes the call-out fee from the non-guaranteed repair range.
 - Store pricing data on the job in a structured format suitable for dashboard display and payment creation.
 
+### Hard Gate: Form Before Payment
+
+- Add a server-side check that blocks payment session creation if the intake form has not been submitted.
+- This check must live at the server action level — it cannot be UI-only.
+- Return a clear error state so the voice assistant or dashboard knows why payment creation was blocked.
+
 ### Backend Interfaces
 
-- Add internal route handlers or server actions for creating call sessions, updating intake data, running classification, and generating pricing.
+- Add internal route handlers or server actions for creating call sessions, generating intake form tokens, triggering SMS delivery of the form link, and processing classification and pricing.
 - Ensure missing required fields block progression to `qualified` or `priced` states.
 
 ### QA And Acceptance Coverage
 
-- Add tests for extraction validation, classification mapping, pricing rule selection, and required-field enforcement.
-- Create fixture transcripts for common scenarios such as boiler failure, leak investigation, and electrical fault.
+- Add tests for token generation, token expiry, form field validation, submission idempotency, classification mapping, pricing rule selection, and the hard gate that blocks payment when the form is incomplete.
+- Add a demo fixture that simulates a complete mid-call form submission for boiler failure, leak investigation, and electrical fault scenarios.
 
 ### After this milestone, you can…
 
-- Feed a transcript or mocked call event into the system and produce a structured, classified, priced job.
-- Show a worker-ready issue summary and customer-ready pricing response.
-- Demo the structured business flow without live phone, scheduling, or payment integrations.
+- Simulate a call starting, a form link being generated, a customer filling in the form on their phone, and the job advancing to qualified.
+- Show a worker-ready issue summary and customer-ready pricing response built from verified form data.
+- Demonstrate that a payment link cannot be created until the form is complete.
 
 ## Milestone 3: Worker Availability, Scheduling, And Reservation Holds
 
@@ -112,15 +137,16 @@
 
 - Offer real available slots for a classified job.
 - Temporarily hold a worker slot and prevent conflicting bookings.
-- Demo the path from structured intake through price estimate and slot reservation.
+- Demo the path from form-verified intake through price estimate and slot reservation.
 
 ## Milestone 4: Payments, Expiry Workflows, And Booking Confirmation
 
-**Goal:** Require successful Stripe payment before confirming bookings, and automatically release unpaid reservations.
+**Goal:** Require successful Stripe payment before confirming bookings, automatically release unpaid reservations, and enforce that the payment link is only sent after the intake form is complete.
 
 ### Stripe Payment Flow
 
 - Create Stripe Checkout or Payment Link sessions for the call-out fee tied to a job and reservation.
+- Before creating the session, verify that the intake form has been submitted and all required customer fields are present — return an error if not.
 - Store Stripe identifiers, payment amount, payment status, and related metadata in the payment table.
 - Generate a secure customer payment URL that can be sent by SMS or displayed in a demo flow.
 
@@ -144,17 +170,19 @@
 ### QA And Acceptance Coverage
 
 - Test successful payment confirmation, failed payment handling, repeated webhook delivery, and reservation expiry.
-- Add integration-style tests for the full priced job to reserved slot to paid confirmation path using mocked Stripe events.
+- Test that payment session creation is blocked when the intake form is incomplete.
+- Add integration-style tests for the full qualified job to reserved slot to paid confirmation path using mocked Stripe events.
 
 ### After this milestone, you can…
 
 - Confirm bookings only after successful payment.
+- Demonstrate that a payment link is never sent to a customer who has not completed the intake form.
 - Demonstrate unpaid reservations expiring automatically.
 - Show retry-safe behavior for repeated Stripe webhook events.
 
 ## Milestone 5: Voice, SMS Handoff, And Image Upload
 
-**Goal:** Connect the app-owned business flow to Vapi voice events, SMS handoffs, optional image upload, and image analysis.
+**Goal:** Connect the app-owned business flow to Vapi voice events, SMS handoffs for the intake form and payment link, optional image upload, and image analysis.
 
 ### Vapi Voice Integration
 
@@ -164,15 +192,16 @@
 
 ### Conversation Orchestration
 
-- Create backend actions the voice assistant can call for intake updates, classification, pricing, slot generation, reservation creation, and payment-link creation.
-- Define required-field checks so the assistant can ask natural follow-up questions while the backend controls progression.
+- Create backend actions the voice assistant can call for: triggering the intake form SMS, checking form completion status, running classification, generating pricing, offering slots, creating reservations, and creating the payment link.
+- The assistant must check form completion status before attempting to move to pricing or payment — the backend enforces this, but the assistant must be able to ask the customer to complete the form if it is not yet done.
 - Store transcripts, event history, and summaries for worker review.
 
 ### SMS Handoff
 
-- Implement message generation for image upload links, payment links, and booking confirmations.
+- Implement message generation for intake form links, image upload links, payment links, and booking confirmations.
 - Wire SMS sending through Vapi where supported, or through a notification adapter with a mocked local fallback.
 - Track outbound messages and delivery-relevant metadata for troubleshooting.
+- Ensure the intake form SMS is sent immediately when a call session is created, not deferred.
 
 ### Image Upload
 
@@ -183,17 +212,18 @@
 ### Image Analysis
 
 - Add optional OpenAI image analysis for uploaded assets.
-- Append image-derived context to the job record without overwriting verified intake details.
+- Append image-derived context to the job record without overwriting the verified intake form data.
 - Surface analysis status and results in the job detail data model.
 
 ### QA And Acceptance Coverage
 
-- Test Vapi event ingestion, repeated transcript updates, SMS link generation, signed upload access, and image-analysis failure handling.
-- Run a mocked end-to-end call flow from intake through payment link creation.
+- Test Vapi event ingestion, repeated transcript updates, intake form SMS generation, signed upload access, and image-analysis failure handling.
+- Run a mocked end-to-end call flow from call start through form submission, classification, pricing, slot selection, and payment link creation.
+- Verify the assistant correctly holds back from payment when the form is not yet complete.
 
 ### After this milestone, you can…
 
-- Demo the real call and SMS hybrid flow.
+- Demo the real call and SMS hybrid flow including the mid-call intake form handoff.
 - Let customers upload images that enrich job context.
 - Show a natural conversation that still produces structured, state-controlled booking progress.
 
@@ -209,8 +239,8 @@
 
 ### Job Management UI
 
-- Build job list views filtered by pending, reserved, confirmed, completed, and expired states.
-- Build a job detail view showing customer details, problem summary, classification, urgency, price estimate, assigned worker, reservation, payment status, transcript summary, and uploaded images.
+- Build job list views filtered by pending (form not yet submitted), qualified, reserved, confirmed, completed, and expired states.
+- Build a job detail view showing customer details, intake form completion status, problem summary, classification, urgency, price estimate, assigned worker, reservation, payment status, transcript summary, and uploaded images.
 - Add status actions for completing a job and reviewing expired or failed-payment jobs.
 
 ### Worker Management UI
@@ -253,19 +283,21 @@
 
 ### End-To-End Flow
 
-- Script and test the successful booking scenario from customer call through intake, classification, pricing, slot hold, payment, confirmation, and dashboard update.
+- Script and test the successful booking scenario from customer call through mid-call form handoff, form submission, classification, pricing, slot hold, payment, confirmation, and dashboard update.
+- Script and test the scenario where the customer has not filled in the form and the system correctly blocks the payment link until the form is complete.
 - Script and test the image upload scenario where analysis improves context but does not block booking.
 - Script and test reservation expiry, payment retry safety, and overlapping availability protection.
 
 ### Reliability And Observability
 
-- Add structured logging for call sessions, classification attempts, reservation creation, payment events, webhook processing, and expiry workflows.
-- Add admin-visible error states for failed classification, failed image analysis, failed SMS delivery, and failed payment creation.
+- Add structured logging for call sessions, intake form token generation, form submissions, classification attempts, reservation creation, payment events, webhook processing, and expiry workflows.
+- Add admin-visible error states for failed classification, failed image analysis, failed SMS delivery, failed payment creation, and blocked payment attempts due to incomplete intake.
 - Ensure external webhook endpoints validate signatures or shared secrets where applicable.
 
 ### Security Baseline
 
 - Confirm dashboard routes require authentication.
+- Confirm intake form tokens are short-lived and validated server-side.
 - Confirm uploaded images are private and displayed through signed access.
 - Confirm Stripe-hosted payment is used and raw card data is never stored.
 - Review customer PII storage and remove unnecessary sensitive fields from logs.
@@ -279,13 +311,15 @@
 ### Polish And Usability
 
 - Improve dashboard empty states, loading states, error messages, and status labels.
-- Review the voice assistant wording for clarity around estimates, reservation holds, and payment-backed confirmation.
+- Review the voice assistant wording for clarity around the form handoff, estimates, reservation holds, and payment-backed confirmation.
 - Verify the UI clearly communicates that bookings are not confirmed until payment succeeds.
+- Verify the intake form is fast, clear, and pleasant to complete on a mobile screen during a live call.
 
 ### Final Verification
 
 - Run the full automated test suite.
 - Manually verify webhook replay safety and double-booking prevention.
+- Manually verify that the payment link is never reachable before the intake form is complete.
 - Manually verify the final demo path in a production-like environment.
 
 ### After this milestone, you can…

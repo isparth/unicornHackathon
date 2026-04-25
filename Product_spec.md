@@ -46,8 +46,9 @@ They want:
 
 - The conversation should feel natural and human, not like a rigid phone tree.
 - The business flow must still remain structured underneath the conversation.
-- The assistant should gather information opportunistically rather than forcing a fixed script.
+- Customer details are collected through a form, not parsed from speech — this ensures accuracy.
 - A booking is only confirmed after successful payment.
+- The payment link is never sent before the customer has completed the intake form — this is a hard system rule.
 - The first version is for a single service business, not a multi-tenant platform.
 
 ## End-to-End User Flow
@@ -57,25 +58,53 @@ They want:
 - Customer calls a business phone number
 - AI answers instantly
 
-### 2. AI Intake Conversation
+### 2. AI Gathers Problem Context
 
 The AI should:
 
-- Understand the customer problem
-- Ask structured follow-up questions naturally
-- Gather enough information to qualify the job
+- Understand the customer problem through natural conversation
+- Establish the urgency level (emergency, same-day, or scheduled)
+- Ask any relevant follow-up questions about the issue
 
-Example questions:
+The AI collects only problem context verbally. It does not attempt to collect names, addresses, or phone numbers over the phone.
 
-- What’s the issue?
-- Where is it located?
-- Is it urgent?
-- Are there any error codes?
-- Has this happened before?
+Example verbal exchange:
 
-### 3. Optional Image Upload
+- What's the issue?
+- Is it urgent or can it wait?
+- Any error codes or visible damage?
 
-If useful, the AI sends a link by SMS so the customer can upload an image.
+### 3. Intake Form Sent Mid-Call
+
+Immediately after the problem context is established, the AI sends a short intake form link to the customer's phone by SMS — while the call is still active.
+
+The AI tells the customer:
+
+`I've just sent you a quick form by text — it takes less than a minute. Could you fill it in now while we're on the call?`
+
+The form collects:
+
+- Customer name
+- Service address (line 1, city, postcode)
+- Phone number confirmation
+- Problem description in the customer's own words
+- Any additional relevant details
+
+The form is mobile-optimised and designed to be completed in under 60 seconds on a phone screen.
+
+### 4. Form Completion Advances the Job
+
+Once the customer submits the form, the system:
+
+- Writes the verified customer details to the database
+- Advances the job from `intake` to `qualified`
+- Signals the AI that it can proceed with pricing and scheduling
+
+If the customer has not yet submitted the form, the AI holds back and gently reminds them, but does not proceed to pricing or payment.
+
+### 5. Optional Image Upload
+
+If useful, the AI sends a separate link by SMS so the customer can upload an image.
 
 The image is used to improve:
 
@@ -83,11 +112,11 @@ The image is used to improve:
 - Confidence in classification
 - Price estimate context
 
-Image upload is optional and should not block the booking flow.
+Image upload is optional and does not block the booking flow.
 
-### 4. Job Classification
+### 6. Job Classification
 
-The system determines:
+Using the problem description from the form, the system determines:
 
 - Job type
 - Urgency level
@@ -105,7 +134,7 @@ Urgency examples:
 - Same-day
 - Scheduled
 
-### 5. Price Estimation
+### 7. Price Estimation
 
 The AI provides a pricing response that may include:
 
@@ -118,7 +147,7 @@ Example:
 
 Pricing should be clear enough to move the customer forward, without pretending to guarantee a final repair total before inspection.
 
-### 6. Scheduling
+### 8. Scheduling
 
 The AI checks worker availability and proposes suitable time slots.
 
@@ -126,7 +155,7 @@ Example:
 
 `I can offer tomorrow 2–4pm or the next day morning. Which works better for you?`
 
-### 7. Reservation
+### 9. Reservation
 
 Once the customer selects a slot, the system places a temporary hold on that booking.
 
@@ -134,9 +163,11 @@ Once the customer selects a slot, the system places a temporary hold on that boo
 - The reservation is time-limited
 - Default example hold window: 2 hours
 
-### 8. Payment Request
+### 10. Payment Request
 
-The AI sends a payment link by SMS or web link to collect the call-out fee.
+Only after the intake form is fully submitted does the system send a payment link by SMS to collect the call-out fee.
+
+This is enforced at the system level — the payment link cannot be generated if the intake form is incomplete.
 
 Supported payment methods in v1:
 
@@ -146,9 +177,9 @@ Supported payment methods in v1:
 
 Example:
 
-`To confirm your booking, please pay the £80 call-out fee using the secure link I’ve just sent.`
+`To confirm your booking, please pay the £80 call-out fee using the secure link I've just sent.`
 
-### 9. Booking Confirmation
+### 11. Booking Confirmation
 
 If payment succeeds:
 
@@ -187,16 +218,18 @@ The dashboard should include a calendar-style view showing:
 
 Each job should include:
 
-- Customer details
+- Customer details (from the verified intake form)
 - AI-generated issue summary
 - Uploaded images, if any
 - Price estimate
 - Assigned worker
 - Job status
+- Intake form completion status
 
 Core statuses:
 
-- Pending
+- Pending (form not yet submitted)
+- Qualified (form complete, awaiting pricing or slot)
 - Reserved
 - Confirmed
 - Completed
@@ -214,35 +247,51 @@ The dashboard should show payment state linked to the booking:
 ### 1. AI Call Handling
 
 - Answer inbound calls
-- Hold a natural conversation
-- Extract structured data from speech
-- Save the key information so the worker can review it before the appointment
+- Hold a natural conversation about the problem
+- Establish urgency verbally
+- Save the transcript so the worker can review it before the appointment
 
-### 2. Call + SMS Hybrid Flow
+### 2. Mid-Call Form Handoff
+
+The AI must send an intake form link by SMS at the start of every call and actively guide the customer to complete it during the call.
+
+The form link must:
+
+- Be sent immediately after the problem context is established
+- Be tied to the specific call session via a signed token
+- Expire after a configurable window
+- Be mobile-optimised and fast to complete
+
+### 3. Call + SMS Hybrid Flow
 
 The system must support phone conversation plus outbound messages for:
 
+- Intake form link (sent mid-call)
 - Image upload link
 - Payment link
 - Booking confirmation
 
-### 3. Structured Intake Engine
+### 4. Structured Intake Via Form
 
-The system must capture:
+The form must capture:
 
-- Problem type
-- Urgency
-- Customer details
-- Location
-- Relevant issue details
+- Customer name
+- Service address
+- Phone number confirmation
+- Problem description in the customer's own words
+- Additional issue details
 
-### 4. Image Upload + Analysis
+### 5. Image Upload + Analysis
 
 - Customer can upload an image through a link
 - System stores the image
 - System may analyze the image for additional context
 
-### 5. Pricing Logic
+### 6. Classification
+
+The system classifies the job using the form's problem description to determine trade, urgency, and job type.
+
+### 7. Pricing Logic
 
 Pricing must support:
 
@@ -250,7 +299,7 @@ Pricing must support:
 - Price ranges
 - Business-configurable pricing inputs
 
-### 6. Availability + Scheduling
+### 8. Availability + Scheduling
 
 The system must:
 
@@ -258,21 +307,22 @@ The system must:
 - Match jobs to workers based on skill
 - Generate available slots
 
-### 7. Reservation System
+### 9. Reservation System
 
 - Support a temporary booking state
 - Expire unpaid reservations automatically
 
-### 8. Payment Integration
+### 10. Payment Integration
 
-- Generate a payment link
+- Generate a payment link only after the intake form is complete
 - Accept card, Apple Pay, and Google Pay
 - Confirm the booking only after payment success
 
-### 9. Notifications
+### 11. Notifications
 
 Customer notifications:
 
+- Intake form link (mid-call)
 - Image upload prompt
 - Payment link
 - Booking confirmation
@@ -299,19 +349,23 @@ The demo should show:
 
 1. A judge calls the number
 2. The AI answers immediately
-3. The judge says, `My boiler isn’t working`
-4. The AI asks natural follow-up questions
-5. The AI sends an image upload link
-6. The AI gives a price expectation
-7. The AI offers available time slots
-8. The AI sends a payment link
-9. The judge pays
-10. The dashboard updates live with the confirmed booking
+3. The judge says, `My boiler isn't working`
+4. The AI asks two or three natural follow-up questions about the problem
+5. The AI says: `I've just sent you a quick form by text — fill it in now and we'll get you sorted`
+6. The judge opens the SMS, fills in their name, address, and problem details on the form
+7. The system advances the job to qualified
+8. The AI provides a price expectation
+9. The AI offers available time slots
+10. The AI sends a payment link — only now that the form is complete
+11. The judge pays
+12. The dashboard updates live with the confirmed booking
 
 ## Success Criteria For v1
 
 - A caller can move from first contact to paid booking in a few minutes
 - The interaction feels conversational rather than scripted
+- Customer details are accurate because they came directly from the customer via the form
+- The payment link is never sent to a customer who has not completed the intake form
 - The business gets enough structured data to act on the job
 - The system clearly distinguishes reserved bookings from confirmed bookings
 - The dashboard reflects call, booking, and payment state accurately

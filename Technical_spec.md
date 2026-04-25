@@ -25,7 +25,7 @@ The architecture is designed to balance:
 - `Vapi` for inbound voice runtime and SMS handoff
 - `Supabase` for Postgres, auth, storage, and realtime updates
 - `Stripe` for payment collection and payment confirmation
-- `OpenAI` for structured extraction, classification, and image analysis
+- `OpenAI` for job classification and optional image analysis
 - `Inngest` for async workflows, delays, retries, and reservation expiry
 
 ### Deployment Assumption
@@ -76,27 +76,44 @@ The assistant should not behave like a rigid call-center script.
 Instead:
 
 - It can vary wording
-- It can ask questions in different orders
 - It can acknowledge context naturally
-- It can skip already-known questions
+- It can ask natural follow-up questions about the problem
 
 But underneath that flexibility, the system tracks required structured fields and business state transitions deterministically.
 
-### Structured Intake Model
+### Intake Strategy: Mid-Call Form Handoff
 
-The system should collect required information opportunistically rather than with a fixed sequence.
+Customer contact details are collected through a structured web form, not extracted from voice transcripts. This produces accurate, verified data without relying on speech-to-text parsing of names, addresses, and phone numbers.
 
-Expected core intake fields:
+The flow works as follows:
+
+1. The AI answers the call and asks two lightweight verbal questions: what is the problem, and how urgent is it.
+2. The AI immediately sends a short intake form link by SMS to the caller's number.
+3. While still on the call, the AI tells the customer the form has been sent and asks them to fill it in — it takes under a minute.
+4. The backend polls or receives a webhook when the form is submitted.
+5. Once the form is complete, the backend advances the job from `intake` to `qualified` and the AI can continue with pricing and scheduling.
+
+The payment link is never sent until the intake form has been fully submitted. This is a hard system constraint, not a soft reminder.
+
+### Fields Collected by Voice
+
+- Problem description (verbal summary, stored as transcript context)
+- Urgency signal (emergency, same-day, or scheduled)
+
+### Fields Collected by Form
 
 - Customer name
-- Phone number
-- Service address or location details
-- Problem summary
-- Problem category
-- Urgency
-- Required trade or skill
-- Optional image attachment
-- Selected slot
+- Service address (line 1, city, postcode)
+- Phone number confirmation
+- Problem description (free text, from the customer's own words)
+- Any additional relevant details
+
+### Form Design Constraints
+
+- The form must be mobile-optimised — it is always opened on a phone during a live call
+- The form must be completable in under 60 seconds
+- The form is accessed via a short-lived signed token tied to the call session
+- Submission is idempotent — resubmitting the same token updates rather than duplicates the record
 
 ## Core State Machine
 
@@ -115,16 +132,20 @@ Primary states:
 
 ### State Intent
 
-- `intake`: call is active or initial information is being gathered
-- `qualified`: enough structured information exists to classify the job
+- `intake`: call is active and the intake form has not yet been submitted
+- `qualified`: intake form is complete and the job has enough structured information to classify and price
 - `priced`: pricing response has been prepared or delivered
 - `slot_held`: a time slot is reserved temporarily
-- `awaiting_payment`: customer has been sent to payment
+- `awaiting_payment`: customer has been sent to payment — only reachable after intake form is complete
 - `confirmed`: payment succeeded and booking is locked in
 - `expired`: reservation expired before successful payment
 - `completed`: job was finished by the business
 
 The state machine governs system actions, but not the exact wording or turn-by-turn order of the conversation.
+
+### Hard Gate: Form Before Payment
+
+The system must enforce that a job cannot reach `awaiting_payment` unless the intake form has been submitted and all required fields are present on the customer and job records. This check is applied at the server action level, not just in UI logic.
 
 ## Main Components
 
@@ -135,26 +156,39 @@ Responsibilities:
 - Receive inbound call events from `Vapi`
 - Track live call/session context
 - Capture transcript and event history
+- Generate a signed intake form token and trigger SMS delivery at call start
 - Send SMS links for image upload and payment when needed
 
 Key output:
 
 - Structured call session record
+- Signed intake form token linked to the call session
 - Events that drive orchestration decisions
 
-### 2. Intake And Classification Service
+### 2. Intake Form Service
 
 Responsibilities:
 
-- Extract structured fields from transcript and interaction context
-- Classify problem type
-- Determine urgency
-- Infer required worker skill
-- Generate a worker-friendly summary of the issue
+- Generate short-lived signed tokens tied to a call session
+- Serve the mobile-optimised intake form at `/intake/[token]`
+- Accept and validate form submissions
+- Write verified customer fields directly to the `customers` and `jobs` tables
+- Mark the intake form as complete on the call session record
+- Advance the job to `qualified` once all required fields are present
 
-This layer uses `OpenAI` and persists the resulting structured data into the application database.
+This replaces AI transcript extraction for contact details. Data written here is treated as ground truth and is not overwritten by downstream processes.
 
-### 3. Image Analysis Service
+### 3. Classification Service
+
+Responsibilities:
+
+- Classify the problem type using the verified problem description from the intake form
+- Determine the required worker skill
+- Generate a concise worker-facing issue summary
+
+This layer uses `OpenAI` for classification only. It does not attempt to extract contact details or addresses. It runs after the intake form is submitted and operates on clean, structured input.
+
+### 4. Image Analysis Service
 
 Responsibilities:
 
@@ -165,7 +199,7 @@ Responsibilities:
 
 Image analysis is supplemental and must not block the main booking flow.
 
-### 4. Pricing Service
+### 5. Pricing Service
 
 Responsibilities:
 
@@ -175,7 +209,7 @@ Responsibilities:
 
 For v1, pricing remains simple and intentionally non-exhaustive.
 
-### 5. Scheduling Service
+### 6. Scheduling Service
 
 Responsibilities:
 
@@ -192,26 +226,28 @@ The scheduling model is intentionally simple for v1:
 - Optional rough service area matching
 - No route optimization
 
-### 6. Payment Orchestration Service
+### 7. Payment Orchestration Service
 
 Responsibilities:
 
+- Verify intake form completion before creating any payment session
 - Create Stripe-backed payment flow
 - Link payment attempt to reservation
 - Advance job state on successful payment
 - Prevent duplicate confirmations from repeated webhook delivery
 
-### 7. Notification Service
+### 8. Notification Service
 
 Responsibilities:
 
 - Send customer-facing messages such as:
+  - intake form link (mid-call, immediately after call starts)
   - image upload prompt
   - payment link
   - booking confirmation
 - Surface business-facing alerts and realtime dashboard updates
 
-### 8. Async Workflow Layer
+### 9. Async Workflow Layer
 
 `Inngest` will handle:
 
@@ -245,7 +281,8 @@ Stores:
 - Voice session identifiers
 - Transcript or transcript references
 - Session events
-- Summary and extraction status
+- Intake form token
+- Intake form completion status and timestamp
 
 #### `Job`
 
@@ -327,7 +364,7 @@ Define and use shared enums for:
 - Inbound call handling
 - Live voice runtime
 - Conversation execution at the telephony layer
-- Sending SMS handoff messages where supported
+- Sending SMS handoff messages including the intake form link
 - Emitting webhook or event callbacks into the app
 
 The app remains responsible for business decisions and persistence.
@@ -336,13 +373,14 @@ The app remains responsible for business decisions and persistence.
 
 `OpenAI` is responsible for:
 
-- Transcript-to-structure extraction
-- Job classification
-- Urgency interpretation
-- Worker summary generation
+- Job classification based on verified form input
+- Worker skill inference
+- Worker-facing issue summary generation
 - Optional image analysis
 
-The app must validate and persist the outputs before relying on them for business actions.
+`OpenAI` is not used for extracting contact details, names, addresses, or phone numbers. That data comes directly from the customer via the intake form.
+
+The app must validate and persist OpenAI outputs before relying on them for business actions.
 
 ### Supabase
 
@@ -381,6 +419,12 @@ The app should expose webhook endpoints for:
 - `Vapi` call and event callbacks
 - `Stripe` payment events
 
+### Customer-Facing Pages
+
+The app should expose public pages for:
+
+- `/intake/[token]` — the mobile-optimised intake form served to the customer mid-call
+
 ### Internal Application Endpoints
 
 The app should expose server-side actions or route handlers for:
@@ -391,6 +435,7 @@ The app should expose server-side actions or route handlers for:
 - Slot generation and reservation actions
 - Dashboard payment visibility
 - Image upload initiation and completion
+- Intake form token generation and submission handling
 
 ### Upload Flow
 
@@ -400,6 +445,14 @@ The image flow should support one of:
 - App-mediated upload endpoint
 
 The uploaded asset should be stored privately and linked back to the relevant job or call session.
+
+### Intake Form Token Flow
+
+- A signed token is generated when a call session is created
+- The token encodes the call session ID and an expiry time
+- The token is included in the SMS link sent to the customer
+- On form submission, the token is validated server-side before any data is written
+- Tokens expire after a configurable window (default: 30 minutes)
 
 ## Dashboard Requirements
 
@@ -413,7 +466,8 @@ The dashboard should support:
 
 The UI should clearly distinguish:
 
-- Pending jobs
+- Pending jobs (intake form not yet submitted)
+- Qualified jobs (form submitted, awaiting pricing or slot selection)
 - Reserved jobs
 - Confirmed bookings
 - Completed work
@@ -426,6 +480,7 @@ The UI should clearly distinguish:
 - Reservation expiry must release held capacity automatically
 - Image analysis failure must not block booking progression
 - Missing structured fields must block business transitions that require them
+- A payment link must never be sent before the intake form is fully submitted
 
 ## Security And Compliance Baseline
 
@@ -437,29 +492,40 @@ For v1:
 - Store uploaded images privately
 - Use signed access when temporary asset display is needed
 - Keep customer PII in controlled database records only
+- Intake form tokens must be short-lived and validated server-side before any write
 
 ## Acceptance Scenarios
 
 ### 1. Successful End-to-End Booking
 
 - Customer calls
-- AI gathers issue details
-- System classifies the problem
-- AI shares price expectation
+- AI asks about the problem and urgency
+- AI sends intake form link by SMS
+- Customer fills in the form on their phone during the call
+- System advances the job to `qualified`
+- AI provides a price expectation
 - Customer selects a slot
 - System holds the slot
-- Customer pays
+- Customer pays via SMS payment link
 - Booking becomes confirmed
 - Dashboard updates live
 
-### 2. Image Upload Enhances Context
+### 2. Payment Blocked Until Form Is Complete
+
+- Customer calls and a reservation is held
+- System checks intake form status before creating a payment session
+- Payment link is not sent because the form has not been submitted
+- Customer submits the form
+- System now allows the payment link to be created and sent
+
+### 3. Image Upload Enhances Context
 
 - AI sends an image upload link
 - Customer uploads an image
 - System stores and analyzes it
 - Analysis improves context but does not block booking if unavailable
 
-### 3. Reservation Expiry
+### 4. Reservation Expiry
 
 - Customer chooses a slot
 - Slot is held
@@ -467,23 +533,23 @@ For v1:
 - Hold expires automatically after the configured window
 - Slot becomes available again
 
-### 4. Payment Retry Safety
+### 5. Payment Retry Safety
 
 - Stripe webhook is delivered more than once
 - System processes the event idempotently
 - Booking is confirmed once only
 
-### 5. Availability Protection
+### 6. Availability Protection
 
 - Two customers try to claim overlapping capacity
 - System prevents double-booking
 - Dashboard reflects final reservation and confirmation state correctly
 
-### 6. Natural Conversation With Structured Completion
+### 7. Natural Conversation With Structured Completion
 
-- The AI varies the wording and order of questions
-- The customer experience remains conversational
-- The required structured fields are still collected before pricing, slot hold, or payment progression
+- The AI asks a small number of verbal questions about the problem
+- The structured customer details are collected via the form, not parsed from speech
+- The backend enforces all required fields before allowing pricing, slot hold, or payment
 
 ## v1 Boundaries
 
