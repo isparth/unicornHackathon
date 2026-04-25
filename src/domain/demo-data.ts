@@ -50,6 +50,7 @@ export const demoJobs: Job[] = [
     status: "intake",
     problemSummary:
       "Customer reports no hot water and an error code on the boiler.",
+    jobCategory: "Boiler repair",
     urgency: "same_day",
     requiredSkill: "heating",
     createdAt: "2026-04-25T09:30:00.000Z",
@@ -61,6 +62,7 @@ export const demoJobs: Job[] = [
     customerId: "00000000-0000-4000-8000-000000000302",
     status: "priced",
     problemSummary: "Leak under kitchen sink after using the washing machine.",
+    jobCategory: "Leak investigation",
     urgency: "scheduled",
     requiredSkill: "plumbing",
     priceEstimate: {
@@ -79,6 +81,7 @@ export const demoJobs: Job[] = [
     customerId: "00000000-0000-4000-8000-000000000303",
     status: "confirmed",
     problemSummary: "Downstairs sockets tripping when kettle is switched on.",
+    jobCategory: "Electrical fault",
     urgency: "emergency",
     requiredSkill: "electrical",
     assignedWorkerId: demoWorkers[2].id,

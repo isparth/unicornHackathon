@@ -46,7 +46,8 @@ They want:
 
 - The conversation should feel natural and human, not like a rigid phone tree.
 - The business flow must still remain structured underneath the conversation.
-- Customer details are collected through a form, not parsed from speech — this ensures accuracy.
+- Customer contact details are collected through a form, not parsed from speech — this ensures accuracy.
+- The problem description comes from the voice conversation, not the form — the customer already described it to the agent verbally.
 - A booking is only confirmed after successful payment.
 - The payment link is never sent before the customer has completed the intake form — this is a hard system rule.
 - The first version is for a single service business, not a multi-tenant platform.
@@ -87,10 +88,9 @@ The form collects:
 - Customer name
 - Service address (line 1, city, postcode)
 - Phone number confirmation
-- Problem description in the customer's own words
-- Any additional relevant details
+- Photos of the issue (optional, up to 5)
 
-The form is mobile-optimised and designed to be completed in under 60 seconds on a phone screen.
+The form does not ask the customer to describe the problem in writing — they have already done so verbally with the agent. The form is mobile-optimised and designed to be completed in under 60 seconds on a phone screen.
 
 ### 4. Form Completion Advances the Job
 
@@ -102,21 +102,17 @@ Once the customer submits the form, the system:
 
 If the customer has not yet submitted the form, the AI holds back and gently reminds them, but does not proceed to pricing or payment.
 
-### 5. Optional Image Upload
+### 5. AI Call Summary Generated
 
-If useful, the AI sends a separate link by SMS so the customer can upload an image.
+After the conversation, the system generates a clean AI summary of what was discussed — what the problem is, urgency signals, any relevant detail mentioned verbally.
 
-The image is used to improve:
+This summary is stored on the job record and is what the worker sees before attending. It is not typed by the customer — it is derived from the actual conversation.
 
-- Diagnosis quality
-- Confidence in classification
-- Price estimate context
-
-Image upload is optional and does not block the booking flow.
+Example summary: `Customer reports boiler losing pressure and no hot water for two days. Last serviced three years ago. No error codes visible. Treating as same-day.`
 
 ### 6. Job Classification
 
-Using the problem description from the form, the system determines:
+Using the AI-generated call summary, the system determines:
 
 - Job type
 - Urgency level
@@ -218,9 +214,9 @@ The dashboard should include a calendar-style view showing:
 
 Each job should include:
 
-- Customer details (from the verified intake form)
-- AI-generated issue summary
-- Uploaded images, if any
+- Customer details (from the verified intake form: name, address, phone)
+- AI-generated call summary (what the customer described verbally to the agent)
+- Photos uploaded by the customer via the form, if any
 - Price estimate
 - Assigned worker
 - Job status
@@ -278,20 +274,25 @@ The form must capture:
 - Customer name
 - Service address
 - Phone number confirmation
-- Problem description in the customer's own words
-- Additional issue details
+- Photos of the issue (optional, up to 5)
 
-### 5. Image Upload + Analysis
+The form must not ask the customer to describe the problem — they have already done so verbally.
 
-- Customer can upload an image through a link
-- System stores the image
-- System may analyze the image for additional context
+### 5. AI Call Summary
 
-### 6. Classification
+After the conversation ends, the system generates a concise AI summary of what was discussed. This is stored on the job as `problem_summary` and is what the worker sees before attending. It is derived from the call transcript, not from the form.
 
-The system classifies the job using the form's problem description to determine trade, urgency, and job type.
+### 6. Image Upload + Analysis
 
-### 7. Pricing Logic
+- Customer uploads photos via the intake form (up to 5, optional)
+- System stores photos in Supabase Storage
+- System may analyse photos with OpenAI for additional context
+
+### 7. Classification
+
+The system classifies the job using the AI-generated call summary to determine trade, urgency, and job type.
+
+### 8. Pricing Logic
 
 Pricing must support:
 
@@ -299,7 +300,7 @@ Pricing must support:
 - Price ranges
 - Business-configurable pricing inputs
 
-### 8. Availability + Scheduling
+### 9. Availability + Scheduling
 
 The system must:
 
@@ -307,18 +308,18 @@ The system must:
 - Match jobs to workers based on skill
 - Generate available slots
 
-### 9. Reservation System
+### 10. Reservation System
 
 - Support a temporary booking state
 - Expire unpaid reservations automatically
 
-### 10. Payment Integration
+### 11. Payment Integration
 
 - Generate a payment link only after the intake form is complete
 - Accept card, Apple Pay, and Google Pay
 - Confirm the booking only after payment success
 
-### 11. Notifications
+### 12. Notifications
 
 Customer notifications:
 
@@ -352,8 +353,8 @@ The demo should show:
 3. The judge says, `My boiler isn't working`
 4. The AI asks two or three natural follow-up questions about the problem
 5. The AI says: `I've just sent you a quick form by text — fill it in now and we'll get you sorted`
-6. The judge opens the SMS, fills in their name, address, and problem details on the form
-7. The system advances the job to qualified
+6. The judge opens the SMS, fills in their name and address on the form (and optionally adds a photo)
+7. The system generates an AI summary of the conversation and advances the job to qualified
 8. The AI provides a price expectation
 9. The AI offers available time slots
 10. The AI sends a payment link — only now that the form is complete

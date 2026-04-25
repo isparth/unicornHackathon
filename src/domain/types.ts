@@ -48,6 +48,9 @@ export type CallSession = {
   eventHistory: Record<string, unknown>[];
   summary: string | null;
   extractionStatus: string;
+  intakeFormToken: string | null;
+  intakeFormTokenExpiresAt: string | null;
+  intakeFormCompletedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -66,6 +69,7 @@ export type Job = {
   customerId: EntityId;
   status: JobStatus;
   problemSummary: string | null;
+  jobCategory: string | null;
   urgency: Urgency | null;
   requiredSkill: WorkerSkill | null;
   assignedWorkerId?: EntityId | null;

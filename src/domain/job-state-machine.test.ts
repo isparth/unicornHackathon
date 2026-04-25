@@ -12,6 +12,7 @@ const baseJob: Job = {
   customerId: "customer_001",
   status: "intake",
   problemSummary: "Boiler is not heating water",
+  jobCategory: null,
   urgency: "same_day",
   requiredSkill: "heating",
   createdAt: "2026-04-25T09:00:00.000Z",
