@@ -27,7 +27,7 @@
 
 import { createSupabaseServiceClient } from "@/server/supabase/client";
 import { getAvailableSlots } from "@/server/services/scheduling-service";
-import { badRequest, parseVapiBody } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody } from "../_lib";
 import { NextResponse } from "next/server";
 
 type Args = { jobId?: string; sessionId?: string; maxSlots?: number };
@@ -68,7 +68,7 @@ async function resolveJobId(args: Args): Promise<{ jobId: string } | { error: Ne
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args } = await parseVapiBody<Args>(req);
+  const { args, callId } = await parseVapiBody<Args>(req);
 
   if (!args.jobId && !args.sessionId) {
     return badRequest("Request body must include jobId or sessionId.");
@@ -77,9 +77,20 @@ export async function POST(req: Request): Promise<NextResponse> {
   const resolved = await resolveJobId(args);
   if ("error" in resolved) return resolved.error;
 
+  const t0 = Date.now();
   const result = await getAvailableSlots(resolved.jobId);
+  const durationMs = Date.now() - t0;
 
   if (!result.success) {
+    void logToolCall({
+      toolName: "get-available-slots",
+      callId,
+      jobId: resolved.jobId,
+      args: args as Record<string, unknown>,
+      result: result as Record<string, unknown>,
+      success: false,
+      durationMs,
+    });
     const status = result.error === "job_not_found" ? 404 : result.error === "not_classified" ? 422 : 500;
     return NextResponse.json(
       { success: false, error: result.error, message: result.message },
@@ -94,6 +105,16 @@ export async function POST(req: Request): Promise<NextResponse> {
     startsAt: s.startsAt.toISOString(),
     endsAt: s.endsAt.toISOString(),
   }));
+
+  void logToolCall({
+    toolName: "get-available-slots",
+    callId,
+    jobId: resolved.jobId,
+    args: args as Record<string, unknown>,
+    result: { success: true, slotsReturned: slots.length },
+    success: true,
+    durationMs,
+  });
 
   return NextResponse.json({ success: true, slots });
 }

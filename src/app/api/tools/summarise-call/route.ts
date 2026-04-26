@@ -26,19 +26,31 @@
  */
 
 import { generateCallSummary } from "@/server/services/call-summary-service";
-import { badRequest, parseVapiBody } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody } from "../_lib";
 import { NextResponse } from "next/server";
 
 type Args = { sessionId?: string };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args } = await parseVapiBody<Args>(req);
+  const { args, callId } = await parseVapiBody<Args>(req);
 
   if (!args.sessionId) {
     return badRequest("Request body must include sessionId.");
   }
 
+  const t0 = Date.now();
   const result = await generateCallSummary(args.sessionId);
+  const durationMs = Date.now() - t0;
+
+  void logToolCall({
+    toolName: "summarise-call",
+    callId,
+    sessionId: args.sessionId,
+    args: { sessionId: args.sessionId },
+    result: result as Record<string, unknown>,
+    success: result.success,
+    durationMs,
+  });
 
   if (!result.success) {
     const status =

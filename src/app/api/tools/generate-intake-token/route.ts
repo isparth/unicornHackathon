@@ -22,13 +22,13 @@
 import { issueIntakeFormToken } from "@/server/services/call-session-service";
 import { smsService } from "@/server/services/sms-service";
 import { createSupabaseServiceClient } from "@/server/supabase/client";
-import { badRequest, parseVapiBody, serverError } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody, serverError } from "../_lib";
 import { NextResponse } from "next/server";
 
 type Args = { sessionId?: string };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args } = await parseVapiBody<Args>(req);
+  const { args, callId } = await parseVapiBody<Args>(req);
 
   if (!args.sessionId) {
     return badRequest("Request body must include sessionId.");
@@ -77,10 +77,22 @@ export async function POST(req: Request): Promise<NextResponse> {
     console.warn("[generate-intake-token] No phone_number found for session, skipping WhatsApp resend");
   }
 
-  return NextResponse.json({
+  const payload = {
     success: true,
     intakeFormUrl,
     expiresAt: tokenResult.expiresAt.toISOString(),
     smsSent,
+  };
+
+  void logToolCall({
+    toolName: "generate-intake-token",
+    callId,
+    jobId: sessionRow?.job_id ?? null,
+    sessionId: args.sessionId,
+    args: { sessionId: args.sessionId },
+    result: payload,
+    success: true,
   });
+
+  return NextResponse.json(payload);
 }

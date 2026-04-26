@@ -19,7 +19,7 @@
  */
 
 import { createSupabaseServiceClient } from "@/server/supabase/client";
-import { badRequest, parseVapiBody, serverError } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody, serverError } from "../_lib";
 import { NextResponse } from "next/server";
 
 type Args = { sessionId?: string; jobId?: string };
@@ -30,7 +30,7 @@ type SessionRow = {
 };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args } = await parseVapiBody<Args>(req);
+  const { args, callId } = await parseVapiBody<Args>(req);
 
   if (!args.sessionId && !args.jobId) {
     return badRequest("Request body must include sessionId or jobId.");
@@ -79,10 +79,21 @@ export async function POST(req: Request): Promise<NextResponse> {
     jobStatus = (jobRow as { status: string } | null)?.status ?? null;
   }
 
-  return NextResponse.json({
+  const payload = {
     success: true,
     completed: completedAt != null,
     completedAt,
     jobStatus,
+  };
+
+  void logToolCall({
+    toolName: "check-form-status",
+    callId,
+    jobId: jobId ?? null,
+    args: args as Record<string, unknown>,
+    result: payload,
+    success: true,
   });
+
+  return NextResponse.json(payload);
 }

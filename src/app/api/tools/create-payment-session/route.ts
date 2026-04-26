@@ -39,18 +39,30 @@
 
 import { NextResponse } from "next/server";
 import { createPaymentSession } from "@/server/services/payment-service";
-import { badRequest, parseVapiBody } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody } from "../_lib";
 
 type Args = { jobId?: string };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args } = await parseVapiBody<Args>(req);
+  const { args, callId } = await parseVapiBody<Args>(req);
 
   if (!args.jobId?.trim()) {
     return badRequest("Request body must include jobId.");
   }
 
+  const t0 = Date.now();
   const result = await createPaymentSession(args.jobId);
+  const durationMs = Date.now() - t0;
+
+  void logToolCall({
+    toolName: "create-payment-session",
+    callId,
+    jobId: args.jobId,
+    args: args as Record<string, unknown>,
+    result: result as Record<string, unknown>,
+    success: result.success,
+    durationMs,
+  });
 
   if (!result.success) {
     const status =

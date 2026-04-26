@@ -152,10 +152,15 @@ export default function DashboardPage() {
               </div>
               <span className="db-logo-text">QuickFix</span>
             </div>
-            <Link href="/" className="db-nav-back">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
-              Back to home
-            </Link>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <Link href="/activity" className="db-nav-back">
+                Activity log
+              </Link>
+              <Link href="/" className="db-nav-back">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+                Back to home
+              </Link>
+            </div>
           </div>
         </nav>
 

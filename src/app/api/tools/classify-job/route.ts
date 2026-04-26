@@ -26,7 +26,7 @@
 
 import { createSupabaseServiceClient } from "@/server/supabase/client";
 import { classifyJob } from "@/server/services/classification-service";
-import { badRequest, parseVapiBody } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody } from "../_lib";
 import { NextResponse } from "next/server";
 
 type Args = { jobId?: string; sessionId?: string; problemDescription?: string };
@@ -72,7 +72,7 @@ async function resolveJobId(
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args } = await parseVapiBody<Args>(req);
+  const { args, callId } = await parseVapiBody<Args>(req);
 
   if (!args.jobId && !args.sessionId) {
     return badRequest("Request body must include jobId or sessionId.");
@@ -81,7 +81,19 @@ export async function POST(req: Request): Promise<NextResponse> {
   const resolved = await resolveJobId(args);
   if ("error" in resolved) return resolved.error;
 
+  const t0 = Date.now();
   const result = await classifyJob(resolved.jobId, undefined, args.problemDescription);
+  const durationMs = Date.now() - t0;
+
+  void logToolCall({
+    toolName: "classify-job",
+    callId,
+    jobId: resolved.jobId,
+    args: args as Record<string, unknown>,
+    result: result as Record<string, unknown>,
+    success: result.success,
+    durationMs,
+  });
 
   if (!result.success) {
     const status =

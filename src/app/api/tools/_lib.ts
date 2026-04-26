@@ -27,6 +27,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { createSupabaseServiceClient } from "@/server/supabase/client";
 
 export type ToolErrorCode =
   | "bad_request"
@@ -115,6 +116,41 @@ export async function parseVapiBody<T extends Record<string, unknown>>(
   const args = parseArguments(rawArgs) as T;
 
   return { args, callId, phoneNumber };
+}
+
+// ─── Tool call logging ────────────────────────────────────────────────────────
+
+export type LogToolCallParams = {
+  toolName: string;
+  callId?: string;
+  jobId?: string | null;
+  sessionId?: string | null;
+  args?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  success?: boolean;
+  durationMs?: number;
+};
+
+/**
+ * logToolCall — fire-and-forget write to tool_call_logs.
+ * Never throws; errors are swallowed so they never affect the Vapi response.
+ */
+export async function logToolCall(params: LogToolCallParams): Promise<void> {
+  try {
+    const supabase = createSupabaseServiceClient();
+    await supabase.from("tool_call_logs").insert({
+      tool_name: params.toolName,
+      call_id: params.callId ?? null,
+      job_id: params.jobId ?? null,
+      session_id: params.sessionId ?? null,
+      args: params.args ?? {},
+      result: params.result ?? null,
+      success: params.success ?? null,
+      duration_ms: params.durationMs ?? null,
+    });
+  } catch (err) {
+    console.error("[logToolCall] failed:", err);
+  }
 }
 
 // ─── Response helpers ─────────────────────────────────────────────────────────

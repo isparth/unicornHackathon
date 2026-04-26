@@ -22,13 +22,13 @@
  */
 
 import { createReservation } from "@/server/services/reservation-service";
-import { badRequest, parseVapiBody } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody } from "../_lib";
 import { NextResponse } from "next/server";
 
 type Args = { jobId?: string; workerId?: string; startsAt?: string; endsAt?: string };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args } = await parseVapiBody<Args>(req);
+  const { args, callId } = await parseVapiBody<Args>(req);
 
   if (!args.jobId || !args.workerId || !args.startsAt || !args.endsAt) {
     return badRequest("Request body must include jobId, workerId, startsAt, and endsAt.");
@@ -45,7 +45,19 @@ export async function POST(req: Request): Promise<NextResponse> {
     return badRequest("endsAt must be after startsAt.");
   }
 
+  const t0 = Date.now();
   const result = await createReservation(args.jobId, args.workerId, startsAt, endsAt);
+  const durationMs = Date.now() - t0;
+
+  void logToolCall({
+    toolName: "hold-slot",
+    callId,
+    jobId: args.jobId,
+    args: args as Record<string, unknown>,
+    result: result as Record<string, unknown>,
+    success: result.success,
+    durationMs,
+  });
 
   if (!result.success) {
     const status =

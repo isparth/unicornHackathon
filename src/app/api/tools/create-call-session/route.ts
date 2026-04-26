@@ -30,7 +30,7 @@
  */
 
 import { createCallSessionFromVapi } from "@/server/services/vapi-call-session";
-import { badRequest, parseBody } from "../_lib";
+import { badRequest, logToolCall, parseBody } from "../_lib";
 import { appConfig } from "@/config/app-config";
 import { NextResponse } from "next/server";
 
@@ -96,13 +96,26 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
+  const t0 = Date.now();
   const result = await createCallSessionFromVapi({
     vapiCallId,
     serviceBusinessId,
     phoneNumber,
   });
+  const durationMs = Date.now() - t0;
 
   console.log("[create-call-session] result:", JSON.stringify(result));
+
+  void logToolCall({
+    toolName: "create-call-session",
+    callId: vapiCallId,
+    jobId: result.success ? (result as { jobId?: string }).jobId ?? null : null,
+    sessionId: result.success ? (result as { sessionId?: string }).sessionId ?? null : null,
+    args: { serviceBusinessId, phoneNumber },
+    result: result as Record<string, unknown>,
+    success: result.success,
+    durationMs,
+  });
 
   if (!result.success) {
     return NextResponse.json(result, { status: 500 });
