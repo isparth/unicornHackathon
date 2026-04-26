@@ -39,15 +39,15 @@
 
 import { NextResponse } from "next/server";
 import { createPaymentSession } from "@/server/services/payment-service";
-import { badRequest, logToolCall, parseVapiBody } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody, vapiOk, vapiError } from "../_lib";
 
 type Args = { jobId?: string };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args, callId } = await parseVapiBody<Args>(req);
+  const { args, callId, toolCallId } = await parseVapiBody<Args>(req);
 
   if (!args.jobId?.trim()) {
-    return badRequest("Request body must include jobId.");
+    return vapiError(toolCallId, "Request body must include jobId.");
   }
 
   const t0 = Date.now();
@@ -65,20 +65,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   });
 
   if (!result.success) {
-    const status =
-      result.error === "job_not_found" ? 404
-      : result.error === "intake_form_incomplete" ? 409
-      : result.error === "invalid_job_state" || result.error === "missing_customer_fields" ? 422
-      : result.error === "stripe_not_configured" ? 503
-      : 500;
-
-    return NextResponse.json(
-      { success: false, error: result.error, message: result.message },
-      { status },
-    );
+    return vapiError(toolCallId, result.message || "Payment session creation failed");
   }
 
-  return NextResponse.json({
+  return vapiOk(toolCallId, {
     success: true,
     jobId: result.jobId,
     paymentId: result.paymentId,

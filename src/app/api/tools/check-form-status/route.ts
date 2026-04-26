@@ -19,7 +19,7 @@
  */
 
 import { createSupabaseServiceClient } from "@/server/supabase/client";
-import { badRequest, logToolCall, parseVapiBody, serverError } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody, serverError, vapiOk, vapiError } from "../_lib";
 import { NextResponse } from "next/server";
 
 type Args = { sessionId?: string; jobId?: string };
@@ -30,10 +30,10 @@ type SessionRow = {
 };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args, callId } = await parseVapiBody<Args>(req);
+  const { args, callId, toolCallId } = await parseVapiBody<Args>(req);
 
   if (!args.sessionId && !args.jobId) {
-    return badRequest("Request body must include sessionId or jobId.");
+    return vapiError(toolCallId, "Request body must include sessionId or jobId.");
   }
 
   const supabase = createSupabaseServiceClient();
@@ -48,7 +48,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       .single();
 
     if (error || !data) {
-      return serverError(`Call session not found: ${args.sessionId}`);
+      return vapiError(toolCallId, `Call session not found: ${args.sessionId}`);
     }
     sessionRow = data as SessionRow;
   } else if (args.jobId) {
@@ -61,7 +61,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       .maybeSingle();
 
     if (error) {
-      return serverError(`Failed to look up call session for job: ${error.message}`);
+      return vapiError(toolCallId, `Failed to look up call session for job: ${error.message}`);
     }
     sessionRow = (data as SessionRow | null) ?? null;
   }
@@ -95,5 +95,5 @@ export async function POST(req: Request): Promise<NextResponse> {
     success: true,
   });
 
-  return NextResponse.json(payload);
+  return vapiOk(toolCallId, payload);
 }

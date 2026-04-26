@@ -27,7 +27,7 @@
 
 import { createSupabaseServiceClient } from "@/server/supabase/client";
 import { getAvailableSlots } from "@/server/services/scheduling-service";
-import { badRequest, logToolCall, parseVapiBody } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody, vapiOk, vapiError } from "../_lib";
 import { NextResponse } from "next/server";
 
 type Args = { jobId?: string; sessionId?: string; maxSlots?: number };
@@ -64,14 +64,19 @@ async function resolveJobId(args: Args): Promise<{ jobId: string } | { error: Ne
     return { jobId };
   }
 
-  return { error: badRequest("Request body must include jobId or sessionId.") };
+  return {
+    error: NextResponse.json(
+      { success: false, error: "bad_request", message: "Request body must include jobId or sessionId." },
+      { status: 400 },
+    ),
+  };
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args, callId } = await parseVapiBody<Args>(req);
+  const { args, callId, toolCallId } = await parseVapiBody<Args>(req);
 
   if (!args.jobId && !args.sessionId) {
-    return badRequest("Request body must include jobId or sessionId.");
+    return vapiError(toolCallId, "Request body must include jobId or sessionId.");
   }
 
   const resolved = await resolveJobId(args);
@@ -91,11 +96,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       success: false,
       durationMs,
     });
-    const status = result.error === "job_not_found" ? 404 : result.error === "not_classified" ? 422 : 500;
-    return NextResponse.json(
-      { success: false, error: result.error, message: result.message },
-      { status },
-    );
+    return vapiError(toolCallId, result.message || "Failed to get available slots");
   }
 
   const maxSlots = typeof args.maxSlots === "number" && args.maxSlots > 0 ? args.maxSlots : 5;
@@ -116,5 +117,5 @@ export async function POST(req: Request): Promise<NextResponse> {
     durationMs,
   });
 
-  return NextResponse.json({ success: true, slots });
+  return vapiOk(toolCallId, { success: true, slots });
 }

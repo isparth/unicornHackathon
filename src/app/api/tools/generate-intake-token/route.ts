@@ -22,16 +22,16 @@
 import { issueIntakeFormToken } from "@/server/services/call-session-service";
 import { smsService } from "@/server/services/sms-service";
 import { createSupabaseServiceClient } from "@/server/supabase/client";
-import { badRequest, logToolCall, parseVapiBody, serverError } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody, serverError, vapiOk, vapiError } from "../_lib";
 import { NextResponse } from "next/server";
 
 type Args = { sessionId?: string };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args, callId } = await parseVapiBody<Args>(req);
+  const { args, callId, toolCallId } = await parseVapiBody<Args>(req);
 
   if (!args.sessionId) {
-    return badRequest("Request body must include sessionId.");
+    return vapiError(toolCallId, "Request body must include sessionId.");
   }
 
   // Issue a fresh token
@@ -40,7 +40,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     tokenResult = await issueIntakeFormToken(args.sessionId);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return serverError(`Failed to issue intake form token: ${message}`);
+    return vapiError(toolCallId, `Failed to issue intake form token: ${message}`);
   }
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -94,5 +94,5 @@ export async function POST(req: Request): Promise<NextResponse> {
     success: true,
   });
 
-  return NextResponse.json(payload);
+  return vapiOk(toolCallId, payload);
 }

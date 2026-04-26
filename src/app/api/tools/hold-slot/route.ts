@@ -22,27 +22,27 @@
  */
 
 import { createReservation } from "@/server/services/reservation-service";
-import { badRequest, logToolCall, parseVapiBody } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody, vapiOk, vapiError } from "../_lib";
 import { NextResponse } from "next/server";
 
 type Args = { jobId?: string; workerId?: string; startsAt?: string; endsAt?: string };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args, callId } = await parseVapiBody<Args>(req);
+  const { args, callId, toolCallId } = await parseVapiBody<Args>(req);
 
   if (!args.jobId || !args.workerId || !args.startsAt || !args.endsAt) {
-    return badRequest("Request body must include jobId, workerId, startsAt, and endsAt.");
+    return vapiError(toolCallId, "Request body must include jobId, workerId, startsAt, and endsAt.");
   }
 
   const startsAt = new Date(args.startsAt);
   const endsAt = new Date(args.endsAt);
 
   if (isNaN(startsAt.getTime()) || isNaN(endsAt.getTime())) {
-    return badRequest("startsAt and endsAt must be valid ISO timestamps.");
+    return vapiError(toolCallId, "startsAt and endsAt must be valid ISO timestamps.");
   }
 
   if (endsAt <= startsAt) {
-    return badRequest("endsAt must be after startsAt.");
+    return vapiError(toolCallId, "endsAt must be after startsAt.");
   }
 
   const t0 = Date.now();
@@ -60,19 +60,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   });
 
   if (!result.success) {
-    const status =
-      result.error === "job_not_found" || result.error === "worker_not_found" ? 404
-      : result.error === "invalid_job_state" || result.error === "worker_inactive" ? 422
-      : result.error === "overlap_conflict" ? 409
-      : 500;
-
-    return NextResponse.json(
-      { success: false, error: result.error, message: result.message },
-      { status },
-    );
+    return vapiError(toolCallId, result.message || "Failed to hold slot");
   }
 
-  return NextResponse.json({
+  return vapiOk(toolCallId, {
     success: true,
     reservationId: result.reservation.id,
     expiresAt: result.reservation.expiresAt,

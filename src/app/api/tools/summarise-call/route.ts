@@ -26,16 +26,16 @@
  */
 
 import { generateCallSummary } from "@/server/services/call-summary-service";
-import { badRequest, logToolCall, parseVapiBody } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody, vapiOk, vapiError } from "../_lib";
 import { NextResponse } from "next/server";
 
 type Args = { sessionId?: string };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args, callId } = await parseVapiBody<Args>(req);
+  const { args, callId, toolCallId } = await parseVapiBody<Args>(req);
 
   if (!args.sessionId) {
-    return badRequest("Request body must include sessionId.");
+    return vapiError(toolCallId, "Request body must include sessionId.");
   }
 
   const t0 = Date.now();
@@ -53,18 +53,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   });
 
   if (!result.success) {
-    const status =
-      result.error === "not_found" ? 404
-      : result.error === "no_transcript" || result.error === "transcript_too_short" ? 422
-      : 500;
-
-    return NextResponse.json(
-      { success: false, error: result.error, message: result.message },
-      { status },
-    );
+    return vapiError(toolCallId, result.message || "Call summary failed");
   }
 
-  return NextResponse.json({
+  return vapiOk(toolCallId, {
     success: true,
     summary: result.summary,
     alreadyDone: result.alreadyDone,

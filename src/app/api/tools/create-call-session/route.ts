@@ -30,7 +30,7 @@
  */
 
 import { createCallSessionFromVapi } from "@/server/services/vapi-call-session";
-import { badRequest, logToolCall, parseBody } from "../_lib";
+import { badRequest, logToolCall, parseBody, vapiOk, vapiError } from "../_lib";
 import { appConfig } from "@/config/app-config";
 import { NextResponse } from "next/server";
 
@@ -80,6 +80,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   // Parse LLM-supplied arguments (may be a JSON string)
   const toolCalls = msg?.toolCallList ?? msg?.toolWithToolCallList?.map((t) => t.toolCall) ?? [];
   const args = parseArguments(toolCalls[0]?.function?.arguments);
+  const toolCallId = toolCalls[0]?.id ?? "";
 
   // serviceBusinessId falls back to the configured default — never blocks the call
   const serviceBusinessId =
@@ -91,7 +92,8 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   if (!vapiCallId || !phoneNumber) {
     console.error("[create-call-session] missing call context — vapiCallId or phoneNumber empty");
-    return badRequest(
+    return vapiError(
+      toolCallId,
       `Missing call context from Vapi. vapiCallId="${vapiCallId}" phoneNumber="${phoneNumber}"`,
     );
   }
@@ -118,8 +120,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   });
 
   if (!result.success) {
-    return NextResponse.json(result, { status: 500 });
+    return vapiError(toolCallId, (result as { message?: string }).message ?? "Server error");
   }
 
-  return NextResponse.json(result);
+  return vapiOk(toolCallId, result as Record<string, unknown>);
 }

@@ -1,29 +1,40 @@
 /**
  * Shared helpers for the /api/tools/* Vapi tool-call route handlers.
  *
- * All tool routes follow the same pattern:
- *   - Accept POST with JSON body
- *   - Validate required fields
- *   - Call the relevant service function
- *   - Return JSON { success, ...payload } or { success: false, error, message }
+ * ## Vapi response format (CRITICAL)
  *
- * Vapi expects the response body to be JSON that the assistant can read and
- * incorporate into its next turn.  A non-2xx status signals a hard failure.
+ * Vapi server tools expect this exact JSON structure — always HTTP 200:
  *
- * Vapi body shape (server tool call):
+ *   {
+ *     "results": [
+ *       {
+ *         "toolCallId": "<id from request toolCallList[0].id>",
+ *         "result": "<single-line string — JSON.stringify your payload>"
+ *       }
+ *     ]
+ *   }
+ *
+ * For errors, replace "result" with "error":
+ *   { "results": [{ "toolCallId": "...", "error": "Error message string" }] }
+ *
+ * Do NOT return arbitrary JSON objects directly — Vapi will show
+ * "No result returned" and the LLM won't receive the data.
+ *
+ * Use vapiOk() / vapiError() to produce the correct wrapper automatically.
+ *
+ * Vapi request body shape (server tool call):
  *   {
  *     message: {
  *       type: "tool-calls",
  *       call: { id: "...", customer: { number: "..." } },
  *       toolCallList: [{
- *         id: "tc_...",
+ *         id: "tc_...",          ← this is toolCallId — must echo it back
  *         function: { name: "...", arguments: "{...}" }  ← JSON string or object
  *       }]
  *     }
  *   }
  *
- * parseVapiBody() unwraps this and returns the tool arguments as a plain object,
- * plus the call context (callId, phoneNumber) from the server-injected call object.
+ * parseVapiBody() unwraps this and returns args, callId, phoneNumber, toolCallId.
  */
 
 import { NextResponse } from "next/server";
@@ -54,10 +65,12 @@ type VapiRawBody = {
 export type ParsedVapiBody<T> = {
   /** Unwrapped tool arguments — never null, defaults to {} */
   args: T;
-  /** Vapi call ID from server-injected context */
+  /** Vapi call ID from server-injected context (message.call.id) */
   callId: string;
   /** Caller's phone number in E.164 format */
   phoneNumber: string;
+  /** Tool call ID from the toolCallList entry — must be echoed back in the response */
+  toolCallId: string;
 };
 
 /** Parse function.arguments whether it arrives as a JSON string or plain object. */
@@ -112,10 +125,13 @@ export async function parseVapiBody<T extends Record<string, unknown>>(
     (msg?.toolWithToolCallList?.map((t) => t.toolCall).filter(Boolean) as VapiToolCall[]) ??
     [];
 
-  const rawArgs = toolCalls[0]?.function?.arguments;
+  const firstCall = toolCalls[0];
+  const rawArgs = firstCall?.function?.arguments;
   const args = parseArguments(rawArgs) as T;
+  // toolCallId must be echoed back in the results array so Vapi can match the response
+  const toolCallId = firstCall?.id ?? "";
 
-  return { args, callId, phoneNumber };
+  return { args, callId, phoneNumber, toolCallId };
 }
 
 // ─── Tool call logging ────────────────────────────────────────────────────────
@@ -153,7 +169,37 @@ export async function logToolCall(params: LogToolCallParams): Promise<void> {
   }
 }
 
-// ─── Response helpers ─────────────────────────────────────────────────────────
+// ─── Vapi response helpers ────────────────────────────────────────────────────
+
+/**
+ * vapiOk — wrap a success payload in the format Vapi server tools require.
+ *
+ * Vapi expects:  { results: [{ toolCallId: "...", result: "<string>" }] }
+ * The `result` field must be a single-line string; we JSON.stringify the payload.
+ *
+ * Always returns HTTP 200 — Vapi ignores non-200 responses entirely.
+ */
+export function vapiOk(toolCallId: string, payload: Record<string, unknown>): NextResponse {
+  return NextResponse.json(
+    { results: [{ toolCallId, result: JSON.stringify(payload) }] },
+    { status: 200 },
+  );
+}
+
+/**
+ * vapiError — wrap an error message in the Vapi results format.
+ *
+ * Uses the "error" key per Vapi's spec for tool failures.
+ * Always HTTP 200 — Vapi discards non-200.
+ */
+export function vapiError(toolCallId: string, errorMessage: string): NextResponse {
+  return NextResponse.json(
+    { results: [{ toolCallId, error: errorMessage }] },
+    { status: 200 },
+  );
+}
+
+// ─── Legacy response helpers (used internally, not by Vapi) ──────────────────
 
 /** Return a 400 JSON response with a clear error. */
 export function badRequest(message: string): NextResponse {

@@ -26,7 +26,7 @@
 
 import { createSupabaseServiceClient } from "@/server/supabase/client";
 import { priceJob } from "@/server/services/pricing-service";
-import { badRequest, logToolCall, parseVapiBody } from "../_lib";
+import { badRequest, logToolCall, parseVapiBody, vapiOk, vapiError } from "../_lib";
 import { NextResponse } from "next/server";
 
 type Args = { jobId?: string; sessionId?: string };
@@ -67,15 +67,18 @@ async function resolveJobId(
   }
 
   return {
-    error: badRequest("Request body must include jobId or sessionId."),
+    error: NextResponse.json(
+      { success: false, error: "bad_request", message: "Request body must include jobId or sessionId." },
+      { status: 400 },
+    ),
   };
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { args, callId } = await parseVapiBody<Args>(req);
+  const { args, callId, toolCallId } = await parseVapiBody<Args>(req);
 
   if (!args.jobId && !args.sessionId) {
-    return badRequest("Request body must include jobId or sessionId.");
+    return vapiError(toolCallId, "Request body must include jobId or sessionId.");
   }
 
   const resolved = await resolveJobId(args);
@@ -96,19 +99,11 @@ export async function POST(req: Request): Promise<NextResponse> {
   });
 
   if (!result.success) {
-    const status =
-      result.error === "not_found" ? 404
-      : result.error === "not_classified" ? 422
-      : 500;
-
-    return NextResponse.json(
-      { success: false, error: result.error, message: result.message },
-      { status },
-    );
+    return vapiError(toolCallId, result.message || "Pricing failed");
   }
 
   const { estimate } = result;
-  return NextResponse.json({
+  return vapiOk(toolCallId, {
     success: true,
     calloutFeePence: estimate.calloutFeePence,
     repairEstimateMinPence: estimate.repairEstimateMinPence,
