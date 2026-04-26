@@ -360,6 +360,19 @@ export class SmsService {
     callSessionId: string;
     jobId: string | null;
   }): Promise<SendSmsResult> {
+    // Safety-net: normalise UK local numbers to E.164 if not already done upstream
+    const rawTo = opts.to.replace(/[\s\-().]/g, "");
+    let normalisedTo = rawTo;
+    if (!rawTo.startsWith("+") && !rawTo.startsWith("whatsapp:")) {
+      if (rawTo.startsWith("0044")) normalisedTo = `+44${rawTo.slice(4)}`;
+      else if (rawTo.startsWith("0") && rawTo.length >= 10) normalisedTo = `+44${rawTo.slice(1)}`;
+      else if (rawTo.startsWith("44") && rawTo.length >= 12) normalisedTo = `+${rawTo}`;
+    }
+    if (normalisedTo !== rawTo) {
+      console.warn(`[sms] Normalised phone from "${rawTo}" to "${normalisedTo}"`);
+    }
+    opts = { ...opts, to: normalisedTo };
+
     // 1. Send via provider
     let result: SmsResult;
     try {

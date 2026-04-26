@@ -21,6 +21,24 @@ import type {
 } from "./intake-types";
 import { PHOTO_LIMITS } from "./intake-types";
 
+/**
+ * Normalise a UK phone number to E.164 format (+44...).
+ * Handles common inputs: 07xxx, +447xxx, 00447xxx.
+ * Returns the original string unchanged if it doesn't look like a UK mobile/landline.
+ */
+function normaliseUkPhone(raw: string): string {
+  const digits = raw.replace(/[\s\-().]/g, "");
+  // Already E.164 with +44
+  if (digits.startsWith("+44")) return digits;
+  // International prefix 0044...
+  if (digits.startsWith("0044")) return `+44${digits.slice(4)}`;
+  // Local 0... format → replace leading 0 with +44
+  if (digits.startsWith("0") && digits.length >= 10) return `+44${digits.slice(1)}`;
+  // Already has 44 prefix without + (e.g. 447...)
+  if (digits.startsWith("44") && digits.length >= 12) return `+${digits}`;
+  return digits;
+}
+
 export async function submitIntakeForm(
   token: string,
   fields: IntakeFormFields,
@@ -103,7 +121,7 @@ export async function submitIntakeForm(
       .from("customers")
       .update({
         name: fields.name.trim(),
-        phone_number: fields.phoneNumber.trim(),
+        phone_number: normaliseUkPhone(fields.phoneNumber.trim()),
         address_line_1: fields.addressLine1.trim(),
         city: fields.city.trim(),
         postcode: fields.postcode.trim().toUpperCase(),
@@ -127,7 +145,7 @@ export async function submitIntakeForm(
       .insert({
         service_business_id: serviceBusinessId,
         name: fields.name.trim(),
-        phone_number: fields.phoneNumber.trim(),
+        phone_number: normaliseUkPhone(fields.phoneNumber.trim()),
         address_line_1: fields.addressLine1.trim(),
         city: fields.city.trim(),
         postcode: fields.postcode.trim().toUpperCase(),
