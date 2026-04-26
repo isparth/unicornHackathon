@@ -141,8 +141,19 @@ export function createOpenAIClient(): OpenAIClient {
 export async function classifyJob(
   jobId: string,
   openai: OpenAIClient = createOpenAIClient(),
+  inlineProblemDescription?: string,
 ): Promise<ClassifyJobResult> {
   const supabase = createSupabaseServiceClient();
+
+  // 0. If an inline description was passed (e.g. from the voice agent before a
+  //    call summary exists), write it as the problem_summary so classification
+  //    can proceed without a prior summarise-call step.
+  if (inlineProblemDescription?.trim()) {
+    await supabase
+      .from("jobs")
+      .update({ problem_summary: inlineProblemDescription.trim(), updated_at: new Date().toISOString() })
+      .eq("id", jobId);
+  }
 
   // 1. Load the job
   const { data: job, error: jobError } = await supabase
@@ -175,7 +186,7 @@ export async function classifyJob(
     return {
       success: false,
       error: "no_summary",
-      message: "Job has no problem_summary to classify from. Run the Call Summary Service first.",
+      message: "Job has no problem_summary. Pass problemDescription in the tool call so classification can proceed without a prior summarise-call.",
     };
   }
 

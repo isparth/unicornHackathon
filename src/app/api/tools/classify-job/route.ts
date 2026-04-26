@@ -29,7 +29,7 @@ import { classifyJob } from "@/server/services/classification-service";
 import { badRequest, parseVapiBody } from "../_lib";
 import { NextResponse } from "next/server";
 
-type Args = { jobId?: string; sessionId?: string };
+type Args = { jobId?: string; sessionId?: string; problemDescription?: string };
 
 async function resolveJobId(
   args: Args,
@@ -81,7 +81,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   const resolved = await resolveJobId(args);
   if ("error" in resolved) return resolved.error;
 
-  const result = await classifyJob(resolved.jobId);
+  const result = await classifyJob(resolved.jobId, undefined, args.problemDescription);
 
   if (!result.success) {
     const status =

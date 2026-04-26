@@ -46,21 +46,26 @@ export async function POST(req: Request): Promise<NextResponse> {
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const intakeFormUrl = `${baseUrl}/intake/${tokenResult.token}`;
 
-  // Look up the session to get the customer's phone number
+  // Look up the session → customer to get the phone number
+  // call_sessions has no phone_number column; it's on customers
   const supabase = createSupabaseServiceClient();
   const { data: session } = await supabase
     .from("call_sessions")
-    .select("phone_number, job_id")
+    .select("job_id, customer_id, customers(phone_number)")
     .eq("id", args.sessionId)
     .single();
 
+  type SessionRow = { job_id: string | null; customer_id: string | null; customers: { phone_number: string } | null };
+  const sessionRow = session as SessionRow | null;
+  const phoneNumber = sessionRow?.customers?.phone_number ?? null;
+
   // Resend the WhatsApp with the fresh link (fire-and-forget, never throws)
   let smsSent = false;
-  if (session?.phone_number) {
+  if (phoneNumber) {
     const smsResult = await smsService.sendIntakeFormLink({
-      to: session.phone_number,
+      to: phoneNumber,
       callSessionId: args.sessionId,
-      jobId: (session as { job_id?: string | null }).job_id ?? null,
+      jobId: sessionRow?.job_id ?? null,
       customerName: null,
       intakeFormUrl,
     });
@@ -69,7 +74,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       console.error("[generate-intake-token] WhatsApp resend failed:", smsResult.error);
     }
   } else {
-    console.warn("[generate-intake-token] No phone_number on session, skipping WhatsApp resend");
+    console.warn("[generate-intake-token] No phone_number found for session, skipping WhatsApp resend");
   }
 
   return NextResponse.json({
