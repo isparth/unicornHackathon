@@ -74,6 +74,8 @@ async function resolveJobId(
   };
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export async function POST(req: Request): Promise<NextResponse> {
   const { args, callId, toolCallId } = await parseVapiBody<Args>(req);
 
@@ -84,8 +86,17 @@ export async function POST(req: Request): Promise<NextResponse> {
   const resolved = await resolveJobId(args);
   if ("error" in resolved) return resolved.error;
 
+  // Retry loop: if classify-job is running in parallel and hasn't written
+  // required_skill + urgency yet, wait up to 4 seconds before giving up.
   const t0 = Date.now();
-  const result = await priceJob(resolved.jobId);
+  let result = await priceJob(resolved.jobId);
+  if (!result.success && result.error === "not_classified") {
+    for (let i = 0; i < 4; i++) {
+      await sleep(1000);
+      result = await priceJob(resolved.jobId);
+      if (result.success || result.error !== "not_classified") break;
+    }
+  }
   const durationMs = Date.now() - t0;
 
   void logToolCall({
