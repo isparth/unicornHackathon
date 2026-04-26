@@ -4,7 +4,7 @@
  * Vapi tool: reserve a specific slot for a job.  The agent calls this once
  * the customer has chosen a time.
  *
- * Request body:
+ * Request body (Vapi server tool call — arguments unwrapped from message.toolCallList):
  *   {
  *     jobId:     string   — jobs.id
  *     workerId:  string   — workers.id
@@ -22,25 +22,20 @@
  */
 
 import { createReservation } from "@/server/services/reservation-service";
-import { badRequest, parseBody } from "../_lib";
+import { badRequest, parseVapiBody } from "../_lib";
 import { NextResponse } from "next/server";
 
-type RequestBody = {
-  jobId: string;
-  workerId: string;
-  startsAt: string;
-  endsAt: string;
-};
+type Args = { jobId?: string; workerId?: string; startsAt?: string; endsAt?: string };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const body = await parseBody<RequestBody>(req);
+  const { args } = await parseVapiBody<Args>(req);
 
-  if (!body?.jobId || !body?.workerId || !body?.startsAt || !body?.endsAt) {
+  if (!args.jobId || !args.workerId || !args.startsAt || !args.endsAt) {
     return badRequest("Request body must include jobId, workerId, startsAt, and endsAt.");
   }
 
-  const startsAt = new Date(body.startsAt);
-  const endsAt = new Date(body.endsAt);
+  const startsAt = new Date(args.startsAt);
+  const endsAt = new Date(args.endsAt);
 
   if (isNaN(startsAt.getTime()) || isNaN(endsAt.getTime())) {
     return badRequest("startsAt and endsAt must be valid ISO timestamps.");
@@ -50,7 +45,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     return badRequest("endsAt must be after startsAt.");
   }
 
-  const result = await createReservation(body.jobId, body.workerId, startsAt, endsAt);
+  const result = await createReservation(args.jobId, args.workerId, startsAt, endsAt);
 
   if (!result.success) {
     const status =

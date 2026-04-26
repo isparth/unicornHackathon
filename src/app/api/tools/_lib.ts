@@ -9,6 +9,21 @@
  *
  * Vapi expects the response body to be JSON that the assistant can read and
  * incorporate into its next turn.  A non-2xx status signals a hard failure.
+ *
+ * Vapi body shape (server tool call):
+ *   {
+ *     message: {
+ *       type: "tool-calls",
+ *       call: { id: "...", customer: { number: "..." } },
+ *       toolCallList: [{
+ *         id: "tc_...",
+ *         function: { name: "...", arguments: "{...}" }  ← JSON string or object
+ *       }]
+ *     }
+ *   }
+ *
+ * parseVapiBody() unwraps this and returns the tool arguments as a plain object,
+ * plus the call context (callId, phoneNumber) from the server-injected call object.
  */
 
 import { NextResponse } from "next/server";
@@ -16,6 +31,43 @@ import { NextResponse } from "next/server";
 export type ToolErrorCode =
   | "bad_request"
   | "server_error";
+
+// ─── Vapi body shape ─────────────────────────────────────────────────────────
+
+type VapiToolCall = {
+  id?: string;
+  function?: {
+    name?: string;
+    arguments?: unknown; // JSON string OR plain object
+  };
+};
+
+type VapiRawBody = {
+  message?: {
+    call?: { id?: string; customer?: { number?: string } };
+    toolCallList?: VapiToolCall[];
+    toolWithToolCallList?: Array<{ name?: string; toolCall?: VapiToolCall }>;
+  };
+};
+
+export type ParsedVapiBody<T> = {
+  /** Unwrapped tool arguments — never null, defaults to {} */
+  args: T;
+  /** Vapi call ID from server-injected context */
+  callId: string;
+  /** Caller's phone number in E.164 format */
+  phoneNumber: string;
+};
+
+/** Parse function.arguments whether it arrives as a JSON string or plain object. */
+function parseArguments(raw: unknown): Record<string, unknown> {
+  if (!raw) return {};
+  if (typeof raw === "string") {
+    try { return JSON.parse(raw) as Record<string, unknown>; } catch { return {}; }
+  }
+  if (typeof raw === "object") return raw as Record<string, unknown>;
+  return {};
+}
 
 /**
  * Parse the request body as JSON.  Returns null if parsing fails (no body /
@@ -30,6 +82,42 @@ export async function parseBody<T>(req: Request): Promise<T | null> {
     return null;
   }
 }
+
+/**
+ * parseVapiBody — reads and unwraps a Vapi server tool-call request.
+ *
+ * Vapi wraps the LLM's function arguments inside:
+ *   body.message.toolCallList[0].function.arguments
+ *
+ * This helper extracts:
+ *   - args: the tool's own parameters (unwrapped and JSON-parsed)
+ *   - callId: from body.message.call.id
+ *   - phoneNumber: from body.message.call.customer.number
+ *
+ * Falls back gracefully so callers can handle missing values themselves.
+ */
+export async function parseVapiBody<T extends Record<string, unknown>>(
+  req: Request,
+): Promise<ParsedVapiBody<T>> {
+  const raw = await parseBody<VapiRawBody>(req);
+
+  const msg = raw?.message;
+  const callId = msg?.call?.id ?? "";
+  const phoneNumber = msg?.call?.customer?.number ?? "";
+
+  // Vapi may use toolCallList or toolWithToolCallList
+  const toolCalls: VapiToolCall[] =
+    msg?.toolCallList ??
+    (msg?.toolWithToolCallList?.map((t) => t.toolCall).filter(Boolean) as VapiToolCall[]) ??
+    [];
+
+  const rawArgs = toolCalls[0]?.function?.arguments;
+  const args = parseArguments(rawArgs) as T;
+
+  return { args, callId, phoneNumber };
+}
+
+// ─── Response helpers ─────────────────────────────────────────────────────────
 
 /** Return a 400 JSON response with a clear error. */
 export function badRequest(message: string): NextResponse {

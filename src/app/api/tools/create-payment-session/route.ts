@@ -4,7 +4,7 @@
  * Vapi tool: create a Stripe Checkout Session for a job and return the
  * payment URL so the voice agent can send it to the customer via SMS.
  *
- * Request body:
+ * Request body (Vapi server tool call — arguments unwrapped from message.toolCallList):
  *   {
  *     jobId: string   — jobs.id
  *   }
@@ -39,20 +39,18 @@
 
 import { NextResponse } from "next/server";
 import { createPaymentSession } from "@/server/services/payment-service";
-import { badRequest, parseBody } from "../_lib";
+import { badRequest, parseVapiBody } from "../_lib";
 
-type RequestBody = {
-  jobId: string;
-};
+type Args = { jobId?: string };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const body = await parseBody<RequestBody>(req);
+  const { args } = await parseVapiBody<Args>(req);
 
-  if (!body?.jobId?.trim()) {
+  if (!args.jobId?.trim()) {
     return badRequest("Request body must include jobId.");
   }
 
-  const result = await createPaymentSession(body.jobId);
+  const result = await createPaymentSession(args.jobId);
 
   if (!result.success) {
     const status =

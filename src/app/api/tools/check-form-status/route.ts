@@ -5,7 +5,7 @@
  * submitted the intake form yet.  The agent uses the result to decide whether
  * to proceed to pricing / payment or to ask the customer to check their phone.
  *
- * Request body (one of):
+ * Request body (Vapi server tool call — arguments unwrapped from message.toolCallList):
  *   { sessionId: string }   — look up by call session
  *   { jobId: string }       — look up by job (agent may only have the jobId)
  *
@@ -19,13 +19,10 @@
  */
 
 import { createSupabaseServiceClient } from "@/server/supabase/client";
-import { badRequest, parseBody, serverError } from "../_lib";
+import { badRequest, parseVapiBody, serverError } from "../_lib";
 import { NextResponse } from "next/server";
 
-type RequestBody = {
-  sessionId?: string;
-  jobId?: string;
-};
+type Args = { sessionId?: string; jobId?: string };
 
 type SessionRow = {
   intake_form_completed_at: string | null;
@@ -33,9 +30,9 @@ type SessionRow = {
 };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const body = await parseBody<RequestBody>(req);
+  const { args } = await parseVapiBody<Args>(req);
 
-  if (!body?.sessionId && !body?.jobId) {
+  if (!args.sessionId && !args.jobId) {
     return badRequest("Request body must include sessionId or jobId.");
   }
 
@@ -43,23 +40,22 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   let sessionRow: SessionRow | null = null;
 
-  if (body.sessionId) {
+  if (args.sessionId) {
     const { data, error } = await supabase
       .from("call_sessions")
       .select("intake_form_completed_at, job_id")
-      .eq("id", body.sessionId)
+      .eq("id", args.sessionId)
       .single();
 
     if (error || !data) {
-      return serverError(`Call session not found: ${body.sessionId}`);
+      return serverError(`Call session not found: ${args.sessionId}`);
     }
     sessionRow = data as SessionRow;
-  } else if (body.jobId) {
-    // Find the call session linked to this job
+  } else if (args.jobId) {
     const { data, error } = await supabase
       .from("call_sessions")
       .select("intake_form_completed_at, job_id")
-      .eq("job_id", body.jobId)
+      .eq("job_id", args.jobId)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -71,9 +67,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   const completedAt = sessionRow?.intake_form_completed_at ?? null;
-  const jobId = sessionRow?.job_id ?? body.jobId ?? null;
+  const jobId = sessionRow?.job_id ?? args.jobId ?? null;
 
-  // Optionally fetch current job status so the agent can see the full picture
   let jobStatus: string | null = null;
   if (jobId) {
     const { data: jobRow } = await supabase

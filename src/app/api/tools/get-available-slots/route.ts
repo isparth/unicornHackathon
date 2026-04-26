@@ -6,7 +6,7 @@
  *
  * Accepts jobId or sessionId (resolved to jobId automatically).
  *
- * Request body:
+ * Request body (Vapi server tool call — arguments unwrapped from message.toolCallList):
  *   {
  *     jobId?:     string
  *     sessionId?: string
@@ -27,30 +27,26 @@
 
 import { createSupabaseServiceClient } from "@/server/supabase/client";
 import { getAvailableSlots } from "@/server/services/scheduling-service";
-import { badRequest, parseBody } from "../_lib";
+import { badRequest, parseVapiBody } from "../_lib";
 import { NextResponse } from "next/server";
 
-type RequestBody = {
-  jobId?: string;
-  sessionId?: string;
-  maxSlots?: number;
-};
+type Args = { jobId?: string; sessionId?: string; maxSlots?: number };
 
-async function resolveJobId(body: RequestBody): Promise<{ jobId: string } | { error: NextResponse }> {
-  if (body.jobId) return { jobId: body.jobId };
+async function resolveJobId(args: Args): Promise<{ jobId: string } | { error: NextResponse }> {
+  if (args.jobId) return { jobId: args.jobId };
 
-  if (body.sessionId) {
+  if (args.sessionId) {
     const supabase = createSupabaseServiceClient();
     const { data, error } = await supabase
       .from("call_sessions")
       .select("job_id")
-      .eq("id", body.sessionId)
+      .eq("id", args.sessionId)
       .single();
 
     if (error || !data) {
       return {
         error: NextResponse.json(
-          { success: false, error: "not_found", message: `Call session not found: ${body.sessionId}` },
+          { success: false, error: "not_found", message: `Call session not found: ${args.sessionId}` },
           { status: 404 },
         ),
       };
@@ -72,10 +68,13 @@ async function resolveJobId(body: RequestBody): Promise<{ jobId: string } | { er
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const body = await parseBody<RequestBody>(req);
-  if (!body) return badRequest("Request body must include jobId or sessionId.");
+  const { args } = await parseVapiBody<Args>(req);
 
-  const resolved = await resolveJobId(body);
+  if (!args.jobId && !args.sessionId) {
+    return badRequest("Request body must include jobId or sessionId.");
+  }
+
+  const resolved = await resolveJobId(args);
   if ("error" in resolved) return resolved.error;
 
   const result = await getAvailableSlots(resolved.jobId);
@@ -88,7 +87,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
-  const maxSlots = typeof body.maxSlots === "number" && body.maxSlots > 0 ? body.maxSlots : 5;
+  const maxSlots = typeof args.maxSlots === "number" && args.maxSlots > 0 ? args.maxSlots : 5;
   const slots = result.slots.slice(0, maxSlots).map((s) => ({
     workerId: s.workerId,
     workerName: s.workerName,

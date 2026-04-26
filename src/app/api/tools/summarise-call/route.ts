@@ -5,7 +5,7 @@
  * The agent calls this after the call transcript is available (typically
  * after the call ends or when Vapi delivers a transcript webhook).
  *
- * Request body:
+ * Request body (Vapi server tool call — arguments unwrapped from message.toolCallList):
  *   {
  *     sessionId: string   — call_sessions.id
  *   }
@@ -26,24 +26,21 @@
  */
 
 import { generateCallSummary } from "@/server/services/call-summary-service";
-import { badRequest, parseBody } from "../_lib";
+import { badRequest, parseVapiBody } from "../_lib";
 import { NextResponse } from "next/server";
 
-type RequestBody = {
-  sessionId: string;
-};
+type Args = { sessionId?: string };
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const body = await parseBody<RequestBody>(req);
+  const { args } = await parseVapiBody<Args>(req);
 
-  if (!body?.sessionId) {
+  if (!args.sessionId) {
     return badRequest("Request body must include sessionId.");
   }
 
-  const result = await generateCallSummary(body.sessionId);
+  const result = await generateCallSummary(args.sessionId);
 
   if (!result.success) {
-    // Map service errors to appropriate HTTP status codes
     const status =
       result.error === "not_found" ? 404
       : result.error === "no_transcript" || result.error === "transcript_too_short" ? 422

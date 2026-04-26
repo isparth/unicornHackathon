@@ -6,7 +6,7 @@
  *
  * Accepts either jobId or sessionId — sessionId is resolved to the linked job.
  *
- * Request body:
+ * Request body (Vapi server tool call — arguments unwrapped from message.toolCallList):
  *   {
  *     jobId?:     string   — jobs.id
  *     sessionId?: string   — call_sessions.id (alternative to jobId)
@@ -26,31 +26,28 @@
 
 import { createSupabaseServiceClient } from "@/server/supabase/client";
 import { priceJob } from "@/server/services/pricing-service";
-import { badRequest, parseBody } from "../_lib";
+import { badRequest, parseVapiBody } from "../_lib";
 import { NextResponse } from "next/server";
 
-type RequestBody = {
-  jobId?: string;
-  sessionId?: string;
-};
+type Args = { jobId?: string; sessionId?: string };
 
 async function resolveJobId(
-  body: RequestBody,
+  args: Args,
 ): Promise<{ jobId: string } | { error: NextResponse }> {
-  if (body.jobId) return { jobId: body.jobId };
+  if (args.jobId) return { jobId: args.jobId };
 
-  if (body.sessionId) {
+  if (args.sessionId) {
     const supabase = createSupabaseServiceClient();
     const { data, error } = await supabase
       .from("call_sessions")
       .select("job_id")
-      .eq("id", body.sessionId)
+      .eq("id", args.sessionId)
       .single();
 
     if (error || !data) {
       return {
         error: NextResponse.json(
-          { success: false, error: "not_found", message: `Call session not found: ${body.sessionId}` },
+          { success: false, error: "not_found", message: `Call session not found: ${args.sessionId}` },
           { status: 404 },
         ),
       };
@@ -60,7 +57,7 @@ async function resolveJobId(
     if (!jobId) {
       return {
         error: NextResponse.json(
-          { success: false, error: "not_found", message: `Call session ${body.sessionId} has no linked job yet.` },
+          { success: false, error: "not_found", message: `Call session ${args.sessionId} has no linked job yet.` },
           { status: 422 },
         ),
       };
@@ -75,10 +72,13 @@ async function resolveJobId(
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const body = await parseBody<RequestBody>(req);
-  if (!body) return badRequest("Request body must include jobId or sessionId.");
+  const { args } = await parseVapiBody<Args>(req);
 
-  const resolved = await resolveJobId(body);
+  if (!args.jobId && !args.sessionId) {
+    return badRequest("Request body must include jobId or sessionId.");
+  }
+
+  const resolved = await resolveJobId(args);
   if ("error" in resolved) return resolved.error;
 
   const result = await priceJob(resolved.jobId);
