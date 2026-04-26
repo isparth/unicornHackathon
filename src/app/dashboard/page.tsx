@@ -1,358 +1,669 @@
-import Link from "next/link";
-import { appConfig } from "@/config/app-config";
-import { demoBusiness, demoJobs, demoWorkers } from "@/domain/demo-data";
-import { canTransitionJob } from "@/domain/job-state-machine";
-import type { JobStatus } from "@/domain/types";
+"use client";
 
-const nextStatusByJobStatus: Partial<Record<JobStatus, JobStatus>> = {
-  intake: "qualified",
-  qualified: "priced",
-  priced: "slot_held",
-  slot_held: "awaiting_payment",
-  awaiting_payment: "confirmed",
-  confirmed: "completed",
+import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
+import { createClient } from "@supabase/supabase-js";
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+interface Job {
+  id: string;
+  status: string;
+  job_category: string | null;
+  urgency: string | null;
+  problem_description: string | null;
+  summary: string | null;
+  amount_pence: number | null;
+  payment_currency: string | null;
+  payment_status: string | null;
+  customer_name: string | null;
+  worker_name: string | null;
+  created_at: string;
+}
+
+interface ActivityLog {
+  id: string;
+  tool_name: string;
+  success: boolean;
+  duration_ms: number | null;
+  created_at: string;
+  job_id: string | null;
+  args: Record<string, unknown> | null;
+}
+
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const STATUS_CFG: Record<string, { color: string; bg: string; label: string; dot: string }> = {
+  intake:           { color: "#818cf8", bg: "rgba(129,140,248,0.12)", label: "Intake",           dot: "#818cf8" },
+  qualified:        { color: "#60a5fa", bg: "rgba(96,165,250,0.12)",  label: "Qualified",        dot: "#60a5fa" },
+  priced:           { color: "#fbbf24", bg: "rgba(251,191,36,0.12)",  label: "Priced",           dot: "#fbbf24" },
+  slot_held:        { color: "#a78bfa", bg: "rgba(167,139,250,0.12)", label: "Slot Held",        dot: "#a78bfa" },
+  awaiting_payment: { color: "#fb923c", bg: "rgba(251,146,60,0.12)",  label: "Awaiting Payment", dot: "#fb923c" },
+  confirmed:        { color: "#4ade80", bg: "rgba(74,222,128,0.12)",  label: "Confirmed",        dot: "#4ade80" },
+  completed:        { color: "#94a3b8", bg: "rgba(148,163,184,0.12)", label: "Completed",        dot: "#94a3b8" },
+  expired:          { color: "#f87171", bg: "rgba(248,113,113,0.12)", label: "Expired",          dot: "#f87171" },
 };
 
-function formatMoney(pence: number, currency: string) {
+const TOOL_ICONS: Record<string, string> = {
+  classify_job: "🏷️",
+  price_job: "💰",
+  hold_slot: "📅",
+  create_payment_session: "💳",
+  generate_intake_token: "🔗",
+  summarise_call: "🎙️",
+  check_form_status: "📋",
+  get_available_slots: "🗓️",
+  create_call_session: "📞",
+};
+
+function fmt(pence: number, currency = "GBP") {
   return new Intl.NumberFormat("en-GB", { style: "currency", currency }).format(pence / 100);
 }
 
-const statusConfig: Record<string, { bg: string; color: string; dot: string; label: string }> = {
-  intake:           { bg: "rgba(99,102,241,0.12)",  color: "#a5b4fc", dot: "#6366f1", label: "Intake" },
-  qualified:        { bg: "rgba(59,130,246,0.12)",  color: "#93c5fd", dot: "#3b82f6", label: "Qualified" },
-  priced:           { bg: "rgba(245,158,11,0.12)",  color: "#fcd34d", dot: "#f59e0b", label: "Priced" },
-  slot_held:        { bg: "rgba(139,92,246,0.12)",  color: "#c4b5fd", dot: "#8b5cf6", label: "Slot held" },
-  awaiting_payment: { bg: "rgba(251,146,60,0.12)",  color: "#fdba74", dot: "#f97316", label: "Awaiting payment" },
-  confirmed:        { bg: "rgba(34,197,94,0.12)",   color: "#86efac", dot: "#22c55e", label: "Confirmed" },
-  completed:        { bg: "rgba(100,116,139,0.12)", color: "#94a3b8", dot: "#64748b", label: "Completed" },
-  expired:          { bg: "rgba(239,68,68,0.12)",   color: "#fca5a5", dot: "#ef4444", label: "Expired" },
-};
+function timeAgo(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
 
-const skillColors: Record<string, { bg: string; color: string }> = {
-  heating:    { bg: "rgba(239,68,68,0.1)",   color: "#fca5a5" },
-  plumbing:   { bg: "rgba(59,130,246,0.1)",  color: "#93c5fd" },
-  electrical: { bg: "rgba(250,204,21,0.1)",  color: "#fde047" },
-};
+// ── Live Activity Feed (Client Component) ────────────────────────────────────
 
-const urgencyColors: Record<string, { bg: string; color: string; label: string }> = {
-  emergency: { bg: "rgba(239,68,68,0.1)",   color: "#fca5a5", label: "Emergency" },
-  same_day:  { bg: "rgba(245,158,11,0.1)",  color: "#fcd34d", label: "Same day" },
-  scheduled: { bg: "rgba(34,197,94,0.1)",   color: "#86efac", label: "Scheduled" },
-};
+function LiveActivityFeed() {
+  const [logs, setLogs] = useState<ActivityLog[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchLogs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/activity?limit=8");
+      const data = await res.json();
+      if (data.logs) setLogs(data.logs.slice().reverse());
+    } catch {
+      // silently fail
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLogs();
+    const timer = setInterval(fetchLogs, 5000);
+    return () => clearInterval(timer);
+  }, [fetchLogs]);
+
+  if (loading) {
+    return (
+      <div style={{ padding: "12px 0" }}>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 18px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+            <div className="ov-skel" style={{ width: 28, height: 28, borderRadius: 7 }} />
+            <div style={{ flex: 1 }}>
+              <div className="ov-skel" style={{ width: "55%", height: 11, borderRadius: 4, marginBottom: 5 }} />
+              <div className="ov-skel" style={{ width: "30%", height: 9, borderRadius: 4 }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (logs.length === 0) {
+    return (
+      <div style={{ padding: "32px 18px", textAlign: "center", color: "#334155", fontSize: 13 }}>
+        No recent activity
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {logs.map((log) => {
+        const icon = TOOL_ICONS[log.tool_name] ?? "⚡";
+        return (
+          <div key={log.id} className="ov-activity-row">
+            <div className="ov-activity-icon" style={{ background: log.success ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)" }}>
+              <span style={{ fontSize: 13 }}>{icon}</span>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11.5, color: "#cbd5e1", fontWeight: 500 }}>
+                  {log.tool_name.replace(/_/g, "_\u200B")}
+                </span>
+                <span style={{
+                  fontSize: 9,
+                  fontWeight: 600,
+                  padding: "1px 5px",
+                  borderRadius: 3,
+                  letterSpacing: "0.06em",
+                  background: log.success ? "rgba(74,222,128,0.12)" : "rgba(248,113,113,0.12)",
+                  color: log.success ? "#4ade80" : "#f87171",
+                }}>
+                  {log.success ? "OK" : "ERR"}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>
+                {log.duration_ms != null && <span style={{ fontFamily: "'DM Mono', monospace" }}>{log.duration_ms}ms</span>}
+                {log.job_id && <span style={{ marginLeft: 6 }}>· job {log.job_id.slice(0, 8)}</span>}
+              </div>
+            </div>
+            <div style={{ fontSize: 10.5, color: "#334155", fontFamily: "'DM Mono', monospace", flexShrink: 0 }}>
+              {timeAgo(log.created_at)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Main Dashboard Page ──────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const activeJobs = demoJobs.filter((j) => !["expired", "completed"].includes(j.status));
-  const confirmedJobs = demoJobs.filter((j) => j.status === "confirmed");
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [workers, setWorkers] = useState<{ id: string; active: boolean }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState(new Date());
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [jobsRes, workersRes] = await Promise.all([
+        fetch("/api/dashboard/jobs"),
+        fetch("/api/dashboard/workers"),
+      ]);
+      const jobsData = await jobsRes.json();
+      const workersData = await workersRes.json();
+      if (jobsData.jobs) setJobs(jobsData.jobs);
+      if (workersData.workers) setWorkers(workersData.workers);
+    } catch {
+      // silently fail
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+    setNow(new Date());
+
+    // Supabase realtime
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    const channel = supabase
+      .channel("overview-jobs")
+      .on("postgres_changes", { event: "*", schema: "public", table: "jobs" }, () => {
+        fetchData();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchData]);
+
+  const activeJobs = jobs.filter((j) => !["expired", "completed"].includes(j.status));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const confirmedToday = jobs.filter((j) => {
+    if (j.status !== "confirmed") return false;
+    const d = new Date(j.created_at);
+    return d >= today;
+  });
+  const pendingPayment = jobs.filter((j) => j.payment_status === "pending" || j.status === "awaiting_payment");
+  const activeWorkers = workers.filter((w) => w.active !== false);
+  const recentJobs = jobs.slice(0, 6);
+
+  const STATS = [
+    { label: "Active Jobs", value: activeJobs.length, color: "#6366f1", icon: "📋" },
+    { label: "Confirmed Today", value: confirmedToday.length, color: "#4ade80", icon: "✅" },
+    { label: "Pending Payment", value: pendingPayment.length, color: "#fb923c", icon: "💳" },
+    { label: "Active Workers", value: activeWorkers.length, color: "#60a5fa", icon: "👷" },
+  ];
 
   return (
     <>
       <style>{`
-        .db-page { background: #080c14; min-height: 100vh; color: #f0f4ff; font-family: 'Inter', system-ui, sans-serif; }
-        .db-nav { border-bottom: 1px solid rgba(255,255,255,0.07); padding: 14px 20px; }
-        .db-nav-inner { max-width: 1280px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; }
-        .db-logo { display: flex; align-items: center; gap: 10px; }
-        .db-logo-icon { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg, #6366f1, #8b5cf6); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .db-logo-text { font-weight: 700; font-size: 17px; letter-spacing: -0.02em; }
-        .db-nav-back { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #64748b; padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); text-decoration: none; transition: border-color 0.2s, color 0.2s; }
-        .db-nav-back:hover { border-color: rgba(255,255,255,0.15); color: #94a3b8; }
+        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap');
 
-        .db-main { max-width: 1280px; margin: 0 auto; padding: 0 20px 60px; position: relative; z-index: 1; }
+        .ov-page {
+          min-height: 100vh;
+          background: #080c14;
+          color: #e2e8f0;
+          font-family: 'DM Sans', 'Inter', system-ui, sans-serif;
+          padding: 0 0 80px;
+        }
 
-        .db-header { padding: 36px 0 28px; }
-        .db-header-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
-        .db-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; color: #6366f1; text-transform: uppercase; margin: 0 0 6px; }
-        .db-business-name { font-size: clamp(24px, 4vw, 40px); font-weight: 800; letter-spacing: -0.03em; margin: 0; line-height: 1.1; }
-        .db-metrics { display: flex; gap: 10px; flex-wrap: wrap; }
-        .db-metric { padding: 12px 18px; border-radius: 12px; background: #0f1623; border: 1px solid rgba(255,255,255,0.07); text-align: center; min-width: 80px; }
-        .db-metric-val { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; margin: 0; line-height: 1; }
-        .db-metric-lbl { font-size: 10px; color: #475569; font-weight: 500; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+        /* Header */
+        .ov-header {
+          padding: 32px 32px 0;
+          display: flex;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 20px;
+          flex-wrap: wrap;
+          border-bottom: 1px solid rgba(255,255,255,0.05);
+          padding-bottom: 24px;
+        }
+        .ov-eyebrow {
+          font-size: 10px;
+          font-weight: 600;
+          letter-spacing: 0.12em;
+          color: #6366f1;
+          text-transform: uppercase;
+          margin: 0 0 6px;
+        }
+        .ov-title {
+          font-size: clamp(22px, 3vw, 30px);
+          font-weight: 700;
+          letter-spacing: -0.025em;
+          margin: 0;
+          color: #f1f5f9;
+        }
+        .ov-date {
+          font-family: 'DM Mono', monospace;
+          font-size: 12px;
+          color: #475569;
+          padding: 5px 12px;
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 6px;
+        }
 
-        /* Two-column layout on large screens, single on mobile */
-        .db-grid { display: grid; grid-template-columns: 1fr 340px; gap: 18px; align-items: start; }
+        /* Stats */
+        .ov-stats {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 14px;
+          padding: 24px 32px;
+        }
+        .ov-stat {
+          background: #0f1623;
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 12px;
+          padding: 18px 20px;
+          position: relative;
+          overflow: hidden;
+          transition: border-color 0.2s;
+        }
+        .ov-stat:hover { border-color: rgba(255,255,255,0.12); }
+        .ov-stat::after {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 2px;
+          background: var(--accent-color);
+          opacity: 0.7;
+        }
+        .ov-stat-icon {
+          font-size: 18px;
+          margin-bottom: 10px;
+        }
+        .ov-stat-val {
+          font-family: 'DM Mono', monospace;
+          font-size: 32px;
+          font-weight: 500;
+          line-height: 1;
+          margin: 0 0 4px;
+        }
+        .ov-stat-label {
+          font-size: 11.5px;
+          color: #475569;
+          font-weight: 500;
+          letter-spacing: 0.02em;
+        }
 
-        .db-sidebar { display: flex; flex-direction: column; gap: 16px; }
+        /* Content grid */
+        .ov-grid {
+          display: grid;
+          grid-template-columns: 1fr 340px;
+          gap: 16px;
+          padding: 0 32px;
+        }
 
-        /* Card */
-        .db-card { border-radius: 16px; background: #0f1623; border: 1px solid rgba(255,255,255,0.07); overflow: hidden; }
-        .db-card-head { padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; justify-content: space-between; }
-        .db-card-title { font-weight: 600; font-size: 14px; color: #e2e8f0; }
-        .db-card-count { font-size: 11px; color: #475569; background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 20px; }
+        /* Cards */
+        .ov-card {
+          background: #0f1623;
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 12px;
+          overflow: hidden;
+        }
+        .ov-card-head {
+          padding: 14px 18px;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .ov-card-title {
+          font-size: 13px;
+          font-weight: 600;
+          color: #cbd5e1;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .ov-card-badge {
+          font-family: 'DM Mono', monospace;
+          font-size: 10px;
+          color: #475569;
+          background: rgba(255,255,255,0.04);
+          padding: 2px 7px;
+          border-radius: 20px;
+          border: 1px solid rgba(255,255,255,0.06);
+        }
+        .ov-card-link {
+          font-size: 12px;
+          color: #6366f1;
+          text-decoration: none;
+          transition: color 0.15s;
+        }
+        .ov-card-link:hover { color: #818cf8; }
 
         /* Job rows */
-        .db-job { padding: 16px 18px; border-bottom: 1px solid rgba(255,255,255,0.045); }
-        .db-job:last-child { border-bottom: none; }
-        .db-job-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-        .db-job-summary { font-weight: 600; font-size: 14px; line-height: 1.45; margin: 0 0 6px; color: #e2e8f0; }
-        .db-job-price { font-size: 12px; color: #64748b; margin: 0; }
-        .db-job-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; gap: 10px; flex-wrap: wrap; }
-        .db-next-step { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #161e2e; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); font-size: 12px; }
-        .db-next-flow { color: #64748b; font-family: 'SFMono-Regular', 'Consolas', monospace; }
-        .db-next-ok { font-weight: 600; color: #22c55e; }
-        .db-next-err { font-weight: 600; color: #f87171; }
-        .db-slot-info { font-size: 12px; color: #64748b; display: flex; align-items: center; gap: 6px; }
+        .ov-job-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 12px 18px;
+          border-bottom: 1px solid rgba(255,255,255,0.04);
+          text-decoration: none;
+          color: inherit;
+          transition: background 0.15s;
+        }
+        .ov-job-row:last-child { border-bottom: none; }
+        .ov-job-row:hover { background: rgba(255,255,255,0.025); }
+        .ov-status-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          flex-shrink: 0;
+        }
+        .ov-job-name {
+          font-size: 13px;
+          font-weight: 500;
+          color: #e2e8f0;
+          min-width: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          flex: 1;
+        }
+        .ov-job-cat {
+          font-size: 11px;
+          color: #475569;
+          white-space: nowrap;
+        }
+        .ov-status-badge {
+          font-size: 10px;
+          font-weight: 600;
+          padding: 2px 7px;
+          border-radius: 4px;
+          letter-spacing: 0.04em;
+          white-space: nowrap;
+        }
+        .ov-job-price {
+          font-family: 'DM Mono', monospace;
+          font-size: 11.5px;
+          color: #64748b;
+          white-space: nowrap;
+        }
+        .ov-job-time {
+          font-family: 'DM Mono', monospace;
+          font-size: 10.5px;
+          color: #334155;
+          white-space: nowrap;
+        }
+        .ov-job-arrow {
+          font-size: 12px;
+          color: #334155;
+          flex-shrink: 0;
+        }
 
-        /* Worker rows */
-        .db-worker { padding: 12px 18px; border-bottom: 1px solid rgba(255,255,255,0.045); display: flex; align-items: center; gap: 12px; }
-        .db-worker:last-child { border-bottom: none; }
-        .db-worker-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #fff; flex-shrink: 0; }
-        .db-worker-name { font-weight: 600; font-size: 13px; margin: 0 0 2px; color: #e2e8f0; }
-        .db-worker-area { font-size: 11px; color: #64748b; margin: 0; }
-        .db-worker-skill-wrap { margin-left: auto; }
+        /* Activity feed */
+        .ov-activity-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 10px 18px;
+          border-bottom: 1px solid rgba(255,255,255,0.04);
+          transition: background 0.15s;
+        }
+        .ov-activity-row:last-child { border-bottom: none; }
+        .ov-activity-row:hover { background: rgba(255,255,255,0.02); }
+        .ov-activity-icon {
+          width: 28px;
+          height: 28px;
+          border-radius: 7px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
 
-        /* Status & chips */
-        .db-chip { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 5px; background: rgba(255,255,255,0.05); color: #64748b; border: 1px solid rgba(255,255,255,0.07); white-space: nowrap; }
+        /* Skeleton */
+        .ov-skel {
+          background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.07) 50%, rgba(255,255,255,0.04) 75%);
+          background-size: 200% 100%;
+          animation: ov-shimmer 1.4s infinite;
+        }
+        @keyframes ov-shimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
 
-        /* Info & CTA */
-        .db-info-card { border-radius: 16px; background: #0f1623; border: 1px solid rgba(255,255,255,0.07); padding: 18px; }
-        .db-info-title { font-weight: 600; font-size: 13px; margin: 0 0 12px; color: #e2e8f0; }
-        .db-info-item { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; font-size: 12px; color: #64748b; line-height: 1.55; }
-        .db-info-item:last-child { margin-bottom: 0; }
-        .db-info-dot { width: 5px; height: 5px; border-radius: 50%; background: #6366f1; margin-top: 5px; flex-shrink: 0; }
-        .db-cta { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px 20px; border-radius: 14px; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; font-weight: 600; font-size: 14px; box-shadow: 0 8px 28px rgba(99,102,241,0.25); text-decoration: none; transition: opacity 0.2s, transform 0.15s; }
-        .db-cta:hover { opacity: 0.92; transform: translateY(-1px); }
-
-        /* Pipeline progress bar */
-        .db-pipeline { padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.06); }
-        .db-pipeline-label { font-size: 10px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.07em; margin: 0 0 10px; }
-        .db-pipeline-steps { display: flex; align-items: center; gap: 0; }
-        .db-pipeline-step { display: flex; align-items: center; flex: 1; }
-        .db-pipeline-node { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-        .db-pipeline-line { flex: 1; height: 1px; background: rgba(255,255,255,0.08); }
-        .db-pipeline-node.active { box-shadow: 0 0 0 3px rgba(99,102,241,0.25); }
+        /* Pipeline status bar */
+        .ov-pipeline {
+          display: flex;
+          gap: 0;
+          padding: 0 18px 14px;
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+        .ov-pipeline::-webkit-scrollbar { display: none; }
+        .ov-pipe-step {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+          flex: 1;
+          min-width: 60px;
+        }
+        .ov-pipe-node {
+          width: 9px;
+          height: 9px;
+          border-radius: 50%;
+          flex-shrink: 0;
+        }
+        .ov-pipe-connector {
+          flex: 1;
+          height: 1px;
+          background: rgba(255,255,255,0.07);
+          margin-top: 4px;
+          align-self: flex-start;
+          margin-left: 4px;
+        }
+        .ov-pipe-label {
+          font-size: 8.5px;
+          color: #334155;
+          text-align: center;
+          font-weight: 500;
+          letter-spacing: 0.04em;
+        }
 
         /* Responsive */
-        @media (max-width: 900px) {
-          .db-grid { grid-template-columns: 1fr; }
-          .db-sidebar { display: contents; }
-          .db-sidebar > * { order: 10; }
+        @media (max-width: 1024px) {
+          .ov-stats { grid-template-columns: repeat(2, 1fr); }
+          .ov-grid { grid-template-columns: 1fr; }
         }
-        @media (max-width: 600px) {
-          .db-main { padding: 0 14px 48px; }
-          .db-header { padding: 24px 0 20px; }
-          .db-metrics { gap: 8px; }
-          .db-metric { padding: 10px 14px; min-width: 70px; }
-          .db-metric-val { font-size: 22px; }
-          .db-nav { padding: 12px 14px; }
+        @media (max-width: 640px) {
+          .ov-header { padding: 20px 16px 16px; }
+          .ov-stats { padding: 16px; gap: 10px; }
+          .ov-grid { padding: 0 16px; }
+          .ov-stats { grid-template-columns: repeat(2, 1fr); }
         }
       `}</style>
 
-      <div className="db-page">
+      <div className="ov-page">
         {/* Background glow */}
         <div aria-hidden="true" style={{ position: "fixed", inset: 0, pointerEvents: "none", overflow: "hidden", zIndex: 0 }}>
-          <div style={{ position: "absolute", top: -150, right: "5%", width: 600, height: 600, borderRadius: "50%", background: "radial-gradient(circle, rgba(99,102,241,0.07) 0%, transparent 70%)", filter: "blur(80px)" }} />
-          <div style={{ position: "absolute", bottom: -100, left: "10%", width: 400, height: 400, borderRadius: "50%", background: "radial-gradient(circle, rgba(139,92,246,0.05) 0%, transparent 70%)", filter: "blur(60px)" }} />
+          <div style={{ position: "absolute", top: -120, right: "10%", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, rgba(99,102,241,0.06) 0%, transparent 70%)", filter: "blur(80px)" }} />
+          <div style={{ position: "absolute", bottom: -80, left: "5%", width: 350, height: 350, borderRadius: "50%", background: "radial-gradient(circle, rgba(139,92,246,0.04) 0%, transparent 70%)", filter: "blur(60px)" }} />
         </div>
 
-        {/* Nav */}
-        <nav className="db-nav">
-          <div className="db-nav-inner">
-            <div className="db-logo">
-              <div className="db-logo-icon">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg>
-              </div>
-              <span className="db-logo-text">QuickFix</span>
-            </div>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <Link href="/activity" className="db-nav-back">
-                Activity log
-              </Link>
-              <Link href="/" className="db-nav-back">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
-                Back to home
-              </Link>
-            </div>
-          </div>
-        </nav>
-
-        <div className="db-main">
+        <div style={{ position: "relative", zIndex: 1 }}>
           {/* Header */}
-          <header className="db-header">
-            <div className="db-header-top">
-              <div>
-                <p className="db-eyebrow">{demoBusiness.serviceArea} &bull; Live demo</p>
-                <h1 className="db-business-name">{demoBusiness.name}</h1>
-              </div>
-              <div className="db-metrics">
-                <div className="db-metric">
-                  <p className="db-metric-val" style={{ color: "#6366f1" }}>{activeJobs.length}</p>
-                  <p className="db-metric-lbl">Active jobs</p>
-                </div>
-                <div className="db-metric">
-                  <p className="db-metric-val" style={{ color: "#22c55e" }}>{demoWorkers.length}</p>
-                  <p className="db-metric-lbl">Workers</p>
-                </div>
-                <div className="db-metric">
-                  <p className="db-metric-val" style={{ color: "#f59e0b" }}>{confirmedJobs.length}</p>
-                  <p className="db-metric-lbl">Confirmed</p>
-                </div>
-                <div className="db-metric">
-                  <p className="db-metric-val" style={{ color: "#94a3b8", fontSize: 18 }}>{appConfig.reservationHoldMinutes}m</p>
-                  <p className="db-metric-lbl">Hold window</p>
-                </div>
-              </div>
+          <header className="ov-header">
+            <div>
+              <p className="ov-eyebrow">Operations Centre · Live</p>
+              <h1 className="ov-title">QuickFix Operations</h1>
+            </div>
+            <div className="ov-date">
+              {now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
             </div>
           </header>
 
-          {/* Main grid */}
-          <div className="db-grid">
-            {/* Jobs panel */}
-            <div className="db-card">
-              <div className="db-card-head">
-                <span className="db-card-title">Job Pipeline</span>
-                <span className="db-card-count">{demoJobs.length} jobs</span>
-              </div>
+          {/* Stats */}
+          <div className="ov-stats">
+            {loading
+              ? STATS.map((s) => (
+                  <div key={s.label} className="ov-stat" style={{ "--accent-color": s.color } as React.CSSProperties}>
+                    <div className="ov-skel" style={{ width: 28, height: 28, borderRadius: 6, marginBottom: 10 }} />
+                    <div className="ov-skel" style={{ width: 48, height: 30, borderRadius: 5, marginBottom: 6 }} />
+                    <div className="ov-skel" style={{ width: "70%", height: 10, borderRadius: 4 }} />
+                  </div>
+                ))
+              : STATS.map((s) => (
+                  <div key={s.label} className="ov-stat" style={{ "--accent-color": s.color } as React.CSSProperties}>
+                    <div className="ov-stat-icon">{s.icon}</div>
+                    <div className="ov-stat-val" style={{ color: s.color }}>{s.value}</div>
+                    <div className="ov-stat-label">{s.label}</div>
+                  </div>
+                ))}
+          </div>
 
-              {/* Pipeline legend */}
-              <div className="db-pipeline">
-                <p className="db-pipeline-label">Lifecycle stages</p>
-                <div className="db-pipeline-steps">
-                  {(["intake","qualified","priced","slot_held","awaiting_payment","confirmed","completed"] as JobStatus[]).map((s, i, arr) => {
-                    const cfg = statusConfig[s];
-                    const activeJobs2 = demoJobs.filter(j => j.status === s);
+          {/* Job pipeline bar */}
+          {!loading && jobs.length > 0 && (
+            <div style={{ padding: "0 32px 20px" }}>
+              <div style={{ background: "#0f1623", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "14px 18px 10px" }}>
+                <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.1em", color: "#334155", textTransform: "uppercase", marginBottom: 12 }}>
+                  Job Pipeline
+                </div>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
+                  {(["intake","qualified","priced","slot_held","awaiting_payment","confirmed","completed","expired"] as const).map((s, i, arr) => {
+                    const cfg = STATUS_CFG[s];
+                    const count = jobs.filter(j => j.status === s).length;
                     return (
-                      <div key={s} className="db-pipeline-step">
-                        <div
-                          className={`db-pipeline-node${activeJobs2.length ? " active" : ""}`}
-                          style={{ background: activeJobs2.length ? cfg.dot : "rgba(255,255,255,0.1)" }}
-                          title={`${cfg.label}${activeJobs2.length ? ` (${activeJobs2.length})` : ""}`}
-                        />
-                        {i < arr.length - 1 && <div className="db-pipeline-line" />}
+                      <div key={s} style={{ display: "flex", alignItems: "flex-start", flex: 1 }}>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flex: 1 }}>
+                          <div style={{
+                            width: count > 0 ? 10 : 8,
+                            height: count > 0 ? 10 : 8,
+                            borderRadius: "50%",
+                            background: count > 0 ? cfg.dot : "rgba(255,255,255,0.08)",
+                            boxShadow: count > 0 ? `0 0 0 3px ${cfg.dot}25` : "none",
+                            transition: "all 0.3s",
+                          }} title={`${cfg.label}: ${count}`} />
+                          <span style={{ fontSize: 8, color: count > 0 ? cfg.color : "#334155", fontWeight: 500, textAlign: "center", letterSpacing: "0.03em" }}>
+                            {count > 0 ? count : ""}
+                          </span>
+                        </div>
+                        {i < arr.length - 1 && <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.07)", marginTop: 5 }} />}
                       </div>
                     );
                   })}
                 </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, paddingRight: 0 }}>
+                  {["intake","qualified","priced","slot held","awaiting","confirmed","completed","expired"].map((l) => (
+                    <span key={l} style={{ fontSize: 7.5, color: "#334155", flex: 1, textAlign: "center", letterSpacing: "0.02em" }}>{l}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Main grid */}
+          <div className="ov-grid">
+            {/* Recent Jobs */}
+            <div className="ov-card">
+              <div className="ov-card-head">
+                <span className="ov-card-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#6366f1" }}>
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="9" y1="13" x2="15" y2="13" />
+                    <line x1="9" y1="17" x2="15" y2="17" />
+                  </svg>
+                  Recent Jobs
+                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span className="ov-card-badge">{jobs.length} total</span>
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                  <Link href={"/dashboard/jobs" as any} className="ov-card-link">View all →</Link>
+                </div>
               </div>
 
-              {/* Job list */}
-              {demoJobs.map((job) => {
-                const nextStatus = nextStatusByJobStatus[job.status];
-                const transition = nextStatus ? canTransitionJob(job, nextStatus) : null;
-                const statusCfg = statusConfig[job.status] ?? statusConfig.intake;
-                const urgencyCfg = job.urgency ? urgencyColors[job.urgency] : null;
-                const skillCfg = job.requiredSkill ? skillColors[job.requiredSkill] : null;
-
-                return (
-                  <article key={job.id} className="db-job">
-                    {/* Chips row */}
-                    <div className="db-job-chips">
-                      <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 5, background: statusCfg.bg, color: statusCfg.color, letterSpacing: "0.04em" }}>
-                        {statusCfg.label}
+              {loading ? (
+                <div>
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                      <div className="ov-skel" style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0 }} />
+                      <div className="ov-skel" style={{ flex: 1, height: 11, borderRadius: 4 }} />
+                      <div className="ov-skel" style={{ width: 60, height: 11, borderRadius: 4 }} />
+                    </div>
+                  ))}
+                </div>
+              ) : recentJobs.length === 0 ? (
+                <div style={{ padding: "40px 18px", textAlign: "center", color: "#334155", fontSize: 13 }}>
+                  No jobs yet
+                </div>
+              ) : (
+                recentJobs.map((job) => {
+                  const cfg = STATUS_CFG[job.status] ?? STATUS_CFG.intake;
+                  return (
+                    <Link key={job.id} href={`/dashboard/jobs/${job.id}` as any} className="ov-job-row">
+                      <div className="ov-status-dot" style={{ background: cfg.dot, boxShadow: `0 0 0 2px ${cfg.dot}30` }} />
+                      <div className="ov-job-name">
+                        {job.customer_name ?? "Unknown Customer"}
+                      </div>
+                      {job.job_category && <span className="ov-job-cat">{job.job_category}</span>}
+                      <span
+                        className="ov-status-badge"
+                        style={{ background: cfg.bg, color: cfg.color }}
+                      >
+                        {cfg.label}
                       </span>
-                      {urgencyCfg && (
-                        <span style={{ fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: 5, background: urgencyCfg.bg, color: urgencyCfg.color }}>
-                          {urgencyCfg.label}
-                        </span>
+                      {job.amount_pence != null && (
+                        <span className="ov-job-price">{fmt(job.amount_pence, job.payment_currency ?? "GBP")}</span>
                       )}
-                      {skillCfg && job.requiredSkill && (
-                        <span style={{ fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: 5, background: skillCfg.bg, color: skillCfg.color }}>
-                          {job.requiredSkill}
-                        </span>
-                      )}
-                      {job.jobCategory && <span className="db-chip">{job.jobCategory}</span>}
-                    </div>
-
-                    {/* Summary */}
-                    <p className="db-job-summary">{job.problemSummary}</p>
-
-                    {/* Price */}
-                    {job.priceEstimate && (
-                      <p className="db-job-price">
-                        {formatMoney(job.priceEstimate.calloutFeePence, job.priceEstimate.currency)} call-out &nbsp;&middot;&nbsp;{" "}
-                        {formatMoney(job.priceEstimate.repairEstimateMinPence, job.priceEstimate.currency)}–{formatMoney(job.priceEstimate.repairEstimateMaxPence, job.priceEstimate.currency)} repair
-                      </p>
-                    )}
-
-                    {/* Footer row: slot info + next step */}
-                    <div className="db-job-footer">
-                      {job.selectedSlotStartsAt && (
-                        <div className="db-slot-info">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                          {new Date(job.selectedSlotStartsAt).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}
-                          {" "}
-                          {new Date(job.selectedSlotStartsAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}–{new Date(job.selectedSlotEndsAt!).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
-                        </div>
-                      )}
-                      {transition && (
-                        <div className="db-next-step">
-                          <span className="db-next-flow">{job.status} → {nextStatus}</span>
-                          {transition.allowed
-                            ? <span className="db-next-ok">✓ ready</span>
-                            : <span className="db-next-err">✗ blocked</span>
-                          }
-                        </div>
-                      )}
-                      {!transition && (
-                        <div className="db-next-step">
-                          <span style={{ color: "#475569", fontSize: 12 }}>Terminal state</span>
-                        </div>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
+                      <span className="ov-job-time">{timeAgo(job.created_at)}</span>
+                      <span className="ov-job-arrow">›</span>
+                    </Link>
+                  );
+                })
+              )}
             </div>
 
-            {/* Sidebar */}
-            <div className="db-sidebar">
-              {/* Workers card */}
-              <div className="db-card">
-                <div className="db-card-head">
-                  <span className="db-card-title">Workers</span>
-                  <span className="db-card-count">{demoWorkers.length} active</span>
-                </div>
-                {demoWorkers.map((worker) => {
-                  const sc = skillColors[worker.skill] ?? { bg: "rgba(255,255,255,0.05)", color: "#94a3b8" };
-                  const avatarColors = ["linear-gradient(135deg,#6366f1,#8b5cf6)", "linear-gradient(135deg,#3b82f6,#06b6d4)", "linear-gradient(135deg,#f59e0b,#ef4444)"];
-                  const avatarGrad = avatarColors[demoWorkers.indexOf(worker) % avatarColors.length];
-                  return (
-                    <div key={worker.id} className="db-worker">
-                      <div className="db-worker-avatar" style={{ background: avatarGrad }}>
-                        {worker.name.split(" ").map(n => n[0]).join("")}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p className="db-worker-name">{worker.name}</p>
-                        <p className="db-worker-area">{worker.serviceArea}</p>
-                      </div>
-                      <div className="db-worker-skill-wrap">
-                        <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 5, background: sc.bg, color: sc.color }}>
-                          {worker.skill}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* System status */}
-              <div className="db-info-card">
-                <p className="db-info-title">System Status</p>
-                <div className="db-info-item">
-                  <span className="db-info-dot" style={{ background: "#22c55e" }} />
-                  <span>Vapi AI agent live — handles inbound calls end-to-end</span>
-                </div>
-                <div className="db-info-item">
-                  <span className="db-info-dot" style={{ background: "#22c55e" }} />
-                  <span>Supabase schema with full job state machine active</span>
-                </div>
-                <div className="db-info-item">
-                  <span className="db-info-dot" style={{ background: "#22c55e" }} />
-                  <span>WhatsApp &amp; SMS delivery via Twilio confirmed working</span>
-                </div>
-                <div className="db-info-item">
-                  <span className="db-info-dot" style={{ background: "#f59e0b" }} />
-                  <span>Slot reservations auto-expire after {appConfig.reservationHoldMinutes} minutes</span>
-                </div>
-                <div className="db-info-item" style={{ marginBottom: 0 }}>
-                  <span className="db-info-dot" />
-                  <span>Stripe checkout integrated for callout-fee payment</span>
+            {/* Live Activity */}
+            <div className="ov-card" style={{ height: "fit-content" }}>
+              <div className="ov-card-head">
+                <span className="ov-card-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                  </svg>
+                  Live Activity
+                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#4ade80", animation: "ov-pulse 2s infinite", boxShadow: "0 0 0 2px rgba(74,222,128,0.2)" }} />
+                  <span style={{ fontSize: 10, color: "#4ade80", fontWeight: 600, letterSpacing: "0.06em" }}>LIVE</span>
                 </div>
               </div>
-
-              {/* CTA */}
-              <a href="tel:+441392321255" className="db-cta">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.01 1.18 2 2 0 012 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 14.92v2z" /></svg>
-                Call +44 1392 321255
-              </a>
+              <style>{`@keyframes ov-pulse { 0%,100%{box-shadow:0 0 0 2px rgba(74,222,128,0.2)} 50%{box-shadow:0 0 0 5px rgba(74,222,128,0.08)} }`}</style>
+              <LiveActivityFeed />
             </div>
           </div>
         </div>
