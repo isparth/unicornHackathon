@@ -65,6 +65,10 @@ export const demoJobs: Job[] = [
     jobCategory: "Leak investigation",
     urgency: "scheduled",
     requiredSkill: "plumbing",
+    assignedWorkerId: demoWorkers[1].id,
+    reservationId: "00000000-0000-4000-8000-000000000402",
+    selectedSlotStartsAt: "2026-04-26T10:00:00.000Z",
+    selectedSlotEndsAt: "2026-04-26T12:00:00.000Z",
     priceEstimate: {
       currency: "gbp",
       calloutFeePence: 8000,
