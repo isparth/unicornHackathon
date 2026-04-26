@@ -27,6 +27,7 @@ export type CreateCallSessionParams = {
 export type CreateCallSessionSuccess = {
   success: true;
   sessionId: string;
+  jobId: string | null;
   intakeFormUrl: string;
   tokenExpiresAt: string;
 };
@@ -157,6 +158,7 @@ export async function createCallSessionFromVapi(
   return {
     success: true,
     sessionId,
+    jobId: sessionJobId,
     intakeFormUrl,
     tokenExpiresAt: tokenResult.expiresAt.toISOString(),
   };
