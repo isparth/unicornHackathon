@@ -158,7 +158,7 @@ export async function classifyJob(
   // 1. Load the job
   const { data: job, error: jobError } = await supabase
     .from("jobs")
-    .select("id, problem_summary, required_skill, urgency, job_category")
+    .select("id, status, problem_summary, required_skill, urgency, job_category")
     .eq("id", jobId)
     .single();
 
@@ -171,10 +171,12 @@ export async function classifyJob(
   }
 
   const {
+    status: currentStatus,
     problem_summary: problemSummary,
     required_skill: existingSkill,
     urgency: existingUrgency,
   } = job as {
+    status: string;
     problem_summary: string | null;
     required_skill: WorkerSkill | null;
     urgency: Urgency | null;
@@ -247,14 +249,20 @@ export async function classifyJob(
   }
 
   // 6. Persist to the job record
+  // Advance status intake → qualified (later states are left untouched).
+  const classifyUpdates: Record<string, unknown> = {
+    required_skill: classification.requiredSkill,
+    urgency: classification.urgency,
+    job_category: classification.jobCategory,
+    updated_at: new Date().toISOString(),
+  };
+  if (currentStatus === "intake") {
+    classifyUpdates.status = "qualified";
+  }
+
   const { error: updateError } = await supabase
     .from("jobs")
-    .update({
-      required_skill: classification.requiredSkill,
-      urgency: classification.urgency,
-      job_category: classification.jobCategory,
-      updated_at: new Date().toISOString(),
-    })
+    .update(classifyUpdates)
     .eq("id", jobId);
 
   if (updateError) {

@@ -223,8 +223,10 @@ export async function priceJob(jobId: string): Promise<PriceJobResult> {
     updated_at: new Date().toISOString(),
   };
 
-  // Only advance the status from qualified → priced.  Later states are left alone.
-  if (status === "qualified") {
+  // Advance status to "priced" from either "intake" or "qualified".
+  // ("intake" can happen if classify-job and price-job run in parallel and
+  //  classify hasn't committed yet when price-job reads the row.)
+  if (status === "intake" || status === "qualified") {
     updates.status = "priced";
   }
 
