@@ -1,20 +1,24 @@
 import type { Metadata } from "next";
-
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI Job Intake & Booking Agent",
-  description:
-    "Milestone 1 skeleton for a database-backed home-service booking workflow.",
+  title: "QuickFix — AI Job Booking",
+  description: "Book a plumber, heating engineer, or electrician in minutes with our AI voice agent.",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+          rel="stylesheet"
+        />
+      </head>
       <body>{children}</body>
     </html>
   );
